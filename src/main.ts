@@ -1,7 +1,7 @@
 export type Time = number; // 48-bit
 export type Tick = number; // 48-bit
 
-export type StateLogs<S>  = { [key: Tick]: S };
+export type StateLogs<S> = { [key: Tick]: S };
 export type ActionLogs<A> = { [key: Tick]: A[] };
 
 export type Mach<S, A> = {
@@ -37,7 +37,7 @@ export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time
   var time = action.time;
   var tick = time_to_tick(mach, time);
   var hash = JSON.stringify(action);
-  
+
   // Initilize this tick's actions
   if (!mach.action_logs[tick]) {
     mach.action_logs[tick] = [];
@@ -45,7 +45,7 @@ export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time
 
   // Updates the first action tick
   mach.genesis_tick = Math.min(mach.genesis_tick, tick);
-  
+
   // Get this tick's actions
   var actions = mach.action_logs[tick];
 
@@ -57,13 +57,13 @@ export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time
   }
 
   // Deletes all >tick states
-  for (let t = tick+1; t <= mach.cached_tick; ++t) {
+  for (let t = tick + 1; t <= mach.cached_tick; ++t) {
     delete mach.state_logs[t];
   }
   mach.cached_tick = Math.min(mach.cached_tick, tick);
 
   // Pushes the action
-  actions.push(action); 
+  actions.push(action);
 }
 
 export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S {
@@ -97,4 +97,11 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
   }
 
   return state;
+}
+
+export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: A & { time: Time }): S {
+  // Register the action in the machine
+  register_action(mach, action);
+  // Compute and return the new state up to the action's time
+  return compute(mach, game, action.time)
 }

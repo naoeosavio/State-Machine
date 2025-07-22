@@ -109,3 +109,14 @@ export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: A & { time
   // Compute and return the new state up to the action's time
   return compute(mach, game, action.time)
 }
+
+export function commit<S, A>(mach: Mach<S, A>, time: Time) {
+  const commit_tick = time_to_tick(mach, time);
+  // Delete states and actions up to the commit_tick
+  for (let t = mach.genesis_tick; t < commit_tick; ++t) {
+    delete mach.state_logs[t];
+    delete mach.action_logs[t];
+  }
+  // Update genesis_tick to reflect the new oldest point
+  mach.genesis_tick = Math.max(mach.genesis_tick, commit_tick);
+}

@@ -136,3 +136,11 @@ export function reset_machine<S, A>(mach: Mach<S, A>, initial_state: S) {
   mach.action_logs = {};
   mach.state_logs[mach.genesis_tick] = initial_state;
 }
+
+export function get_state_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): S | undefined {
+  return mach.state_logs[tick];
+}
+
+export function get_action_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): A[] | undefined {
+  return mach.action_logs[tick];
+}

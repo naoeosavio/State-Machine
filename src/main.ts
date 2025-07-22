@@ -120,3 +120,11 @@ export function commit<S, A>(mach: Mach<S, A>, time: Time) {
   // Update genesis_tick to reflect the new oldest point
   mach.genesis_tick = Math.max(mach.genesis_tick, commit_tick);
 }
+
+export function serialize_machine<S, A>(mach: Mach<S, A>): string {
+  return JSON.stringify(mach);
+}
+
+export function deserialize_machine<S, A>(json_string: string): Mach<S, A> {
+  return JSON.parse(json_string);
+}

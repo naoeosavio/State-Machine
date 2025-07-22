@@ -10,3 +10,5 @@ export { register_action } from './main';
 export { compute } from './main';
 export { run } from './main';
 export { commit } from './main';
+export { serialize_machine } from './main';
+export { deserialize_machine } from './main';

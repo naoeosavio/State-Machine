@@ -21,6 +21,13 @@ export type Game<S, A> = {
 
 // TODO: new_mach function
 export function new_mach<S, A>(ticks_per_second: number, max_time_travel: number): Mach<S, A> {
+  if (ticks_per_second <= 0) {
+    throw new Error("ticks_per_second must be a positive number.");
+  }
+  if (max_time_travel < 0) {
+    throw new Error("max_time_travel cannot be negative.");
+  }
+
   const mach: Mach<S, A> = {
     ticks_per_second,
     max_tick_travel:  0, // Temporary value

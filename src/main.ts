@@ -6,7 +6,7 @@ export type ActionLogs<A> = { [key: Tick]: A[] };
 
 export type Mach<S, A> = {
   ticks_per_second: number,
-  max_time_travel: number, // in milliseconds
+  max_tick_travel: Tick,
   genesis_tick: Tick,
   cached_tick: Tick,
   state_logs: StateLogs<S>,
@@ -21,14 +21,16 @@ export type Game<S, A> = {
 
 // TODO: new_mach function
 export function new_mach<S, A>(ticks_per_second: number, max_time_travel: number): Mach<S, A> {
-  return {
+  const mach: Mach<S, A> = {
     ticks_per_second,
-    max_time_travel,
+    max_tick_travel:  0, // Temporary value
     genesis_tick: Infinity,
     cached_tick: -Infinity,
     state_logs: {},
     action_logs: {},
   };
+  mach.max_tick_travel = time_to_tick(mach, max_time_travel);
+  return mach;
 }
 
 export function time_to_tick<S, A>(mach: Mach<S, A>, time: Time): Tick {
@@ -78,7 +80,7 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
     ini_t = mach.genesis_tick;
   }
 
-  if (end_t - ini_t > time_to_tick(mach, mach.max_time_travel)) {
+  if (end_t - ini_t > mach.max_tick_travel) {
     return state;
   }
 

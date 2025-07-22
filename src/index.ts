@@ -12,3 +12,4 @@ export { run } from './main';
 export { commit } from './main';
 export { serialize_machine } from './main';
 export { deserialize_machine } from './main';
+export { reset_machine } from './main';

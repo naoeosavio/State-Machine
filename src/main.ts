@@ -128,3 +128,11 @@ export function serialize_machine<S, A>(mach: Mach<S, A>): string {
 export function deserialize_machine<S, A>(json_string: string): Mach<S, A> {
   return JSON.parse(json_string);
 }
+
+export function reset_machine<S, A>(mach: Mach<S, A>, initial_state: S) {
+  mach.genesis_tick = Infinity;
+  mach.cached_tick = -Infinity;
+  mach.state_logs = {};
+  mach.action_logs = {};
+  mach.state_logs[mach.genesis_tick] = initial_state;
+}

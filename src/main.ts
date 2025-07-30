@@ -44,6 +44,24 @@ export function time_to_tick<S, A>(mach: Mach<S, A>, time: Time): Tick {
   return Math.floor(time / 1000 * mach.ticks_per_second);
 }
 
+// Inserts an action into action_logs, sorting by time
+function insertOrdered<A>(
+  action_logs: A[],
+  action: A & { time: Time },
+) {
+  let low = 0;
+  let high = action_logs.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if ((action_logs[mid]! as A & { time: Time }).time < action.time) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  action_logs.splice(low, 0, action);
+}
+
 export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time }) {
   var time = action.time;
   var tick = time_to_tick(mach, time);
@@ -74,7 +92,7 @@ export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time
   mach.cached_tick = Math.min(mach.cached_tick, tick);
 
   // Pushes the action
-  actions.push(action);
+  insertOrdered(actions,action);
 }
 
 export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S {

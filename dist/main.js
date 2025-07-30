@@ -1,15 +1,39 @@
 // TODO: new_mach function
-export function new_mach(ticks_per_second) {
-    return {
+export function new_mach(ticks_per_second, max_time_travel) {
+    if (ticks_per_second <= 0) {
+        throw new Error("ticks_per_second must be a positive number.");
+    }
+    if (max_time_travel < 0) {
+        throw new Error("max_time_travel cannot be negative.");
+    }
+    const mach = {
         ticks_per_second,
+        max_tick_travel: 0, // Temporary value
         genesis_tick: Infinity,
         cached_tick: -Infinity,
         state_logs: {},
         action_logs: {},
     };
+    mach.max_tick_travel = time_to_tick(mach, max_time_travel);
+    return mach;
 }
 export function time_to_tick(mach, time) {
     return Math.floor(time / 1000 * mach.ticks_per_second);
+}
+// Inserts an action into action_logs, sorting by time
+function insertOrdered(action_logs, action) {
+    let low = 0;
+    let high = action_logs.length;
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (action_logs[mid].time < action.time) {
+            low = mid + 1;
+        }
+        else {
+            high = mid;
+        }
+    }
+    action_logs.splice(low, 0, action);
 }
 export function register_action(mach, action) {
     var time = action.time;
@@ -35,7 +59,7 @@ export function register_action(mach, action) {
     }
     mach.cached_tick = Math.min(mach.cached_tick, tick);
     // Pushes the action
-    actions.push(action);
+    insertOrdered(actions, action);
 }
 export function compute(mach, game, time) {
     var ini_t = mach.cached_tick;
@@ -45,7 +69,7 @@ export function compute(mach, game, time) {
         state = game.init();
         ini_t = mach.genesis_tick;
     }
-    if (end_t - ini_t > 1000) {
+    if (end_t - ini_t > mach.max_tick_travel) {
         return state;
     }
     // NOTE: actions of tick X happen AFTER its recorded state
@@ -62,4 +86,41 @@ export function compute(mach, game, time) {
         }
     }
     return state;
+}
+export function run(mach, game, action) {
+    // Register the action in the machine
+    register_action(mach, action);
+    // Compute and return the new state up to the action's time
+    return compute(mach, game, action.time);
+}
+export function commit(mach, time) {
+    const commit_tick = time_to_tick(mach, time);
+    // Delete states and actions up to the commit_tick
+    for (let t = mach.genesis_tick; t < commit_tick; ++t) {
+        delete mach.state_logs[t];
+        delete mach.action_logs[t];
+    }
+    // Update genesis_tick to reflect the new oldest point
+    mach.genesis_tick = Math.max(mach.genesis_tick, commit_tick);
+}
+export function serialize_machine(mach) {
+    return JSON.stringify(mach);
+}
+export function deserialize_machine(json_string) {
+    return JSON.parse(json_string);
+}
+export function reset_machine(mach) {
+    mach.genesis_tick = Infinity;
+    mach.cached_tick = -Infinity;
+    mach.state_logs = {};
+    mach.action_logs = {};
+}
+export function get_state_at_tick(mach, tick) {
+    return mach.state_logs[tick];
+}
+export function get_action_at_tick(mach, tick) {
+    return mach.action_logs[tick];
+}
+export function get_State(mach) {
+    return mach.state_logs[mach.cached_tick] || mach.state_logs[mach.genesis_tick];
 }

@@ -136,12 +136,11 @@ export function deserialize_machine<S, A>(json_string: string): Mach<S, A> {
   return JSON.parse(json_string);
 }
 
-export function reset_machine<S, A>(mach: Mach<S, A>, initial_state: S) {
+export function reset_machine<S, A>(mach: Mach<S, A>) {
   mach.genesis_tick = Infinity;
   mach.cached_tick = -Infinity;
   mach.state_logs = {};
   mach.action_logs = {};
-  mach.state_logs[mach.genesis_tick] = initial_state;
 }
 
 export function get_state_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): S | undefined {
@@ -150,4 +149,8 @@ export function get_state_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): S | undef
 
 export function get_action_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): A[] | undefined {
   return mach.action_logs[tick];
+}
+
+export function get_State<S, A>(mach: Mach<S, A>): S | undefined {
+  return mach.state_logs[mach.cached_tick] || mach.state_logs[mach.genesis_tick];
 }

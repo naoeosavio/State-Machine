@@ -1,8 +1,9 @@
 export type Time = number; // 48-bit
 export type Tick = number; // 48-bit
 
-export type StateLogs<S> = { [key: Tick]: S };
-export type ActionLogs<A> = { [key: Tick]: A[] };
+type T<A> = A & { time: Time };
+export type StateLogs<S> = Record<Tick, S>;
+export type ActionLogs<A> = Record<Tick, T<A>[]>;
 
 export type Mach<S, A> = {
   ticks_per_second: number,
@@ -15,7 +16,7 @@ export type Mach<S, A> = {
 
 export type Game<S, A> = {
   init: () => S,
-  when: (action: A, state: S) => S,
+  when: (action: T<A>, state: S) => S,
   tick: (state: S) => S,
 };
 
@@ -30,7 +31,7 @@ export function new_mach<S, A>(ticks_per_second: number, max_time_travel: number
 
   const mach: Mach<S, A> = {
     ticks_per_second,
-    max_tick_travel:  0, // Temporary value
+    max_tick_travel: 0, // Temporary value
     genesis_tick: Infinity,
     cached_tick: -Infinity,
     state_logs: {},
@@ -46,14 +47,14 @@ export function time_to_tick<S, A>(mach: Mach<S, A>, time: Time): Tick {
 
 // Inserts an action into action_logs, sorting by time
 function insertOrdered<A>(
-  action_logs: A[],
-  action: A & { time: Time },
+  action_logs: T<A>[],
+  action: T<A>,
 ) {
   let low = 0;
   let high = action_logs.length;
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
-    if ((action_logs[mid]! as A & { time: Time }).time < action.time) {
+    if (action_logs[mid]!.time < action.time) {
       low = mid + 1;
     } else {
       high = mid;
@@ -62,7 +63,7 @@ function insertOrdered<A>(
   action_logs.splice(low, 0, action);
 }
 
-export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time }) {
+export function register_action<S, A>(mach: Mach<S, A>, action: T<A>) {
   var time = action.time;
   var tick = time_to_tick(mach, time);
   var hash = JSON.stringify(action);
@@ -76,7 +77,7 @@ export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time
   mach.genesis_tick = Math.min(mach.genesis_tick, tick);
 
   // Get this tick's actions
-  var actions = mach.action_logs[tick];
+  var actions = mach.action_logs[tick]!;
 
   // If the message is duplicated, skip it
   for (let action of actions) {
@@ -92,7 +93,7 @@ export function register_action<S, A>(mach: Mach<S, A>, action: A & { time: Time
   mach.cached_tick = Math.min(mach.cached_tick, tick);
 
   // Pushes the action
-  insertOrdered(actions,action);
+  insertOrdered(actions, action);
 }
 
 export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S {
@@ -128,7 +129,7 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
   return state;
 }
 
-export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: A & { time: Time }): S {
+export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: T<A>): S {
   // Register the action in the machine
   register_action(mach, action);
   // Compute and return the new state up to the action's time
@@ -165,7 +166,7 @@ export function get_state_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): S | undef
   return mach.state_logs[tick];
 }
 
-export function get_action_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): A[] | undefined {
+export function get_action_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): T<A>[] | undefined {
   return mach.action_logs[tick];
 }
 

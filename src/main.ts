@@ -1,9 +1,9 @@
 export type Time = number; // 48-bit
 export type Tick = number; // 48-bit
 
-type T<A> = A & { time: Time };
+export type Action<A> = A & { time: Time };
 export type StateLogs<S> = Record<Tick, S>;
-export type ActionLogs<A> = Record<Tick, T<A>[]>;
+export type ActionLogs<A> = Record<Tick, Action<A>[]>;
 
 export type Mach<S, A> = {
   ticks_per_second: number,
@@ -16,7 +16,7 @@ export type Mach<S, A> = {
 
 export type Game<S, A> = {
   init: () => S,
-  when: (action: T<A>, state: S) => S,
+  when: (action: Action<A>, state: S) => S,
   tick: (state: S) => S,
 };
 
@@ -47,8 +47,8 @@ export function time_to_tick<S, A>(mach: Mach<S, A>, time: Time): Tick {
 
 // Inserts an action into action_logs, sorting by time
 function insertOrdered<A>(
-  action_logs: T<A>[],
-  action: T<A>,
+  action_logs: Action<A>[],
+  action: Action<A>,
 ) {
   let low = 0;
   let high = action_logs.length;
@@ -63,7 +63,7 @@ function insertOrdered<A>(
   action_logs.splice(low, 0, action);
 }
 
-export function register_action<S, A>(mach: Mach<S, A>, action: T<A>) {
+export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>) {
   var time = action.time;
   var tick = time_to_tick(mach, time);
   var hash = JSON.stringify(action);
@@ -131,7 +131,7 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
   return state;
 }
 
-export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: T<A>): S {
+export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: Action<A>): S {
   // Register the action in the machine
   register_action(mach, action);
   // Compute and return the new state up to the action's time
@@ -168,10 +168,10 @@ export function get_state_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): S | undef
   return mach.state_logs[tick];
 }
 
-export function get_action_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): T<A>[] | undefined {
+export function get_action_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): Action<A>[] | undefined {
   return mach.action_logs[tick];
 }
 
-export function get_State<S, A>(mach: Mach<S, A>): S | undefined {
+export function get_state<S, A>(mach: Mach<S, A>): S | undefined {
   return mach.state_logs[mach.cached_tick] || mach.state_logs[mach.genesis_tick];
 }

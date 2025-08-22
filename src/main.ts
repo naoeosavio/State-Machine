@@ -103,7 +103,7 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
 
   if (!state) {
     state = game.init();
-    ini_t = mach.genesis_tick;
+    ini_t = Math.min(mach.genesis_tick, end_t);
   }
 
   if (end_t - ini_t > mach.max_tick_travel) {

@@ -15,4 +15,4 @@ export { deserialize_machine } from './main';
 export { reset_machine } from './main';
 export { get_state_at_tick } from './main';
 export { get_action_at_tick } from './main';
-export { get_State } from './main';
+export { get_cached_state } from './main';

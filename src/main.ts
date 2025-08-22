@@ -42,7 +42,7 @@ export function new_mach<S, A>(ticks_per_second: number, max_ms_travel: number):
 }
 
 export function time_to_tick<S, A>(mach: Mach<S, A>, time: Time): Tick {
-  return Math.floor(time / 1000 * mach.ticks_per_second);
+  return Math.floor((time * mach.ticks_per_second) / 1000);
 }
 
 // Inserts an action into action_logs, sorting by time

@@ -21,12 +21,12 @@ export type Game<S, A> = {
 };
 
 // TODO: new_mach function
-export function new_mach<S, A>(ticks_per_second: number, max_time_travel: number): Mach<S, A> {
+export function new_mach<S, A>(ticks_per_second: number, max_ms_travel: number): Mach<S, A> {
   if (ticks_per_second <= 0) {
     throw new Error("ticks_per_second must be a positive number.");
   }
-  if (max_time_travel < 0) {
-    throw new Error("max_time_travel cannot be negative.");
+  if (max_ms_travel < 0) {
+    throw new Error("max_ms_travel cannot be negative.");
   }
 
   const mach: Mach<S, A> = {
@@ -37,7 +37,7 @@ export function new_mach<S, A>(ticks_per_second: number, max_time_travel: number
     state_logs: {},
     action_logs: {},
   };
-  mach.max_tick_travel = time_to_tick(mach, max_time_travel);
+  mach.max_tick_travel = time_to_tick(mach, max_ms_travel);
   return mach;
 }
 

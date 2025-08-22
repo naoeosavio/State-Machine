@@ -170,6 +170,16 @@ export function get_action_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): Action<A
   return mach.action_logs[tick];
 }
 
-export function get_state<S, A>(mach: Mach<S, A>): S | undefined {
-  return mach.state_logs[mach.cached_tick] || mach.state_logs[mach.genesis_tick];
+export function get_cached_state<S, A>(mach: Mach<S, A>): S | undefined {
+  // Return the most recently cached state
+  if (mach.cached_tick !== Number.MIN_SAFE_INTEGER) {
+    return mach.state_logs[mach.cached_tick];
+  }
+  
+  // If no cached state, return genesis state if it exists
+  if (mach.genesis_tick !== Number.MAX_SAFE_INTEGER) {
+    return mach.state_logs[mach.genesis_tick];
+  }
+  
+  return undefined;
 }

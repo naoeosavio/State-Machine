@@ -4,13 +4,13 @@ import * as Mach from './main';
 /**
  * A unique identifier for events and effects.
  */
-export type ID = string;
+export type Id = string;
 
 /**
  * Represents a side effect to be executed.
  * @template E The specific type of the effect payload.
  */
-export type SideEffect<E> = { type: string, key: ID } & E;
+export type SideEffect<E> = { $: string; key: Id; payload: E };
 
 /**
  * A function that generates a list of effects based on the transition
@@ -21,10 +21,7 @@ export type SideEffect<E> = { type: string, key: ID } & E;
  * @param newState The state after the action was applied.
  * @returns An array of identifiable effects.
  */
-export type SideEffectGenerator<S, E> = (
-  oldState: S,
-  newState: S
-) => SideEffect<E>[];
+export type SideEffectGenerator<S, E> = (oldState: S, newState: S) => SideEffect<E>[];
 
 /**
  * A function that executes a given effect.
@@ -87,7 +84,7 @@ export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, actio
       } catch (error) {
         // Log the error but continue processing other effects.
         // This provides at-least-once delivery semantics (retries should be handled externally).
-        console.error(`Effect execution failed for ${effect.type}:`, error);
+        console.error(`Effect execution failed for ${effect.$}:`, error);
       }
     }
   }

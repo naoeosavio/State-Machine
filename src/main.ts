@@ -126,8 +126,6 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
     }
   }
 
-  mach.state_logs[end_t] = state;
-
   return state;
 }
 

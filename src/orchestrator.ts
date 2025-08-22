@@ -39,16 +39,16 @@ export type SideEffectExecutor<E> = (effect: SideEffect<E>) => Promise<void>;
 export type SideEffectConfig<S, A, E> = {
   /** The state machine instance. */
   mach: Mach.Mach<S, A>;
-  /** The core game logic (pure functions). */
+  /** The core logic (pure functions). */
   game: Mach.Game<S, A>;
   /** A pure function to generate effects based on state changes (diffs). */
   generator: SideEffectGenerator<S, E>;
   /** The function that executes the side effects. */
   executor: SideEffectExecutor<E>;
-  /** A cache to track processed effect IDs for idempotency.
+  /** A cache to track processed effect Ids for idempotency.
    *  For production, a persistent store like Redis or a database is recommended.
    */
-  idempotencyCache: Set<string>;
+  idempotencyCache: Set<Id>;
 };
 
 /**
@@ -59,7 +59,7 @@ export type SideEffectConfig<S, A, E> = {
  * @param action The action to process.
  * @returns The new state.
  */
-export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
+export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
   const { mach, game, generator, executor, idempotencyCache } = config;
 
   // Compute the state up to the action time BEFORE registering the action.

@@ -32,8 +32,8 @@ export function new_mach<S, A>(ticks_per_second: number, max_time_travel: number
   const mach: Mach<S, A> = {
     ticks_per_second,
     max_tick_travel: 0, // Temporary value
-    genesis_tick: Infinity,
-    cached_tick: -Infinity,
+    genesis_tick: Number.MAX_SAFE_INTEGER,
+    cached_tick: Number.MIN_SAFE_INTEGER,
     state_logs: {},
     action_logs: {},
   };
@@ -156,8 +156,8 @@ export function deserialize_machine<S, A>(json_string: string): Mach<S, A> {
 }
 
 export function reset_machine<S, A>(mach: Mach<S, A>) {
-  mach.genesis_tick = Infinity;
-  mach.cached_tick = -Infinity;
+  mach.genesis_tick = Number.MAX_SAFE_INTEGER;
+  mach.cached_tick = Number.MIN_SAFE_INTEGER;
   mach.state_logs = {};
   mach.action_logs = {};
 }

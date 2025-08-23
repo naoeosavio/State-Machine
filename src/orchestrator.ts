@@ -73,21 +73,22 @@ export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>
   // Plan side effects based on the precise state transition (pure).
   const effects = generator(prev, next);
 
-  // Execute effects with an idempotency guard to tolerate failures.
-  for (const effect of effects) {
-    if (!idempotencyCache.has(effect.key)) {
-      try {
-        // Execute the side effect.
-        await executor(effect);
-        // Mark the effect as successfully executed.
-        idempotencyCache.add(effect.key);
-      } catch (error) {
-        // Log the error but continue processing other effects.
-        // This provides at-least-once delivery semantics (retries should be handled externally).
-        console.error(`Effect execution failed for ${effect.$}:`, error);
-      }
-    }
+  // Filters unprocessed effects (idempotence before execution)
+  const pendingEffects = effects.filter(effect => !idempotencyCache.has(effect.key));
+
+  if (pendingEffects.length === 0) {
+    return next; // Nothing to execute
   }
 
+  // Execute effects with an idempotency guard (sequential, simple)
+  for (const effect of pendingEffects) {
+    try {
+      await executor(effect);
+      idempotencyCache.add(effect.key);
+    } catch (error) {
+      // Log and continue; at-least-once semantics
+      console.error(`Effect execution failed for ${effect.$}:`, error);
+    }
+  }
   return next;
 }

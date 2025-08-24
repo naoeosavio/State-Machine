@@ -35,6 +35,19 @@ export type SideEffectGenerator<S, A, E> = (
 export type SideEffectExecutor<E> = (effect: SideEffect<E>) => Promise<void>;
 
 /**
+ * Configuration options for effect execution strategies.
+ * @template E The specific type of the effect payload.
+ */
+export type EffectExecOptions<E> = {
+  /** Execution strategy: 'parallel' or 'allSettled' */
+  strategy: 'parallel' | 'allSettled';
+  /** Optional custom executor function */
+  executor?: SideEffectExecutor<E>;
+  /** Maximum number of concurrent executions (for parallel strategies) */
+  concurrency?: number;
+};
+
+/**
  * Configuration for side-effect orchestration.
  * @template S The type of the state.
  * @template A The type of the action.
@@ -94,5 +107,52 @@ export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>
       console.error(`Effect execution failed for ${effect.$}:`, error);
     }
   }
+  return next;
+}
+
+
+export async function dispatch_with<S, A, E>(
+  config: SideEffectConfig<S, A, E>,
+  action: Mach.Action<A>,
+  exec: EffectExecOptions<E>
+): Promise<S> {
+  const { mach, game, generator, executor, idempotencyCache } = config;
+  const effectExecutor = exec.executor || executor;
+
+  const prev = Mach.compute(mach, game, action.time);
+  const next = Mach.run(mach, game, action);
+
+  const effects = generator(prev, next, action);
+  const pendingEffects = effects.filter(effect => !idempotencyCache.has(effect.key));
+
+  if (pendingEffects.length === 0) {
+    return next;
+  }
+
+  switch (exec.strategy) {
+    case 'parallel':
+      try {
+        await Promise.all(pendingEffects.map(effect => effectExecutor(effect)));
+        pendingEffects.forEach(effect => idempotencyCache.add(effect.key));
+      } catch (error) {
+        console.error('Some effects failed during parallel execution:', error);
+      }
+      break;
+
+    case 'allSettled':
+      const results = await Promise.allSettled(
+        pendingEffects.map(effect => effectExecutor(effect))
+      );
+      results.forEach((result, index) => {
+        const effect = pendingEffects[index];
+        if (result.status === 'fulfilled') {
+          idempotencyCache.add(effect.key);
+        } else {
+          console.error(`Effect execution failed for ${effect.$}:`, result.reason);
+        }
+      });
+      break;
+  }
+
   return next;
 }

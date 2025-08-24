@@ -21,7 +21,11 @@ export type SideEffect<E> = { $: string; key: Id; payload: E };
  * @param newState The state after the action was applied.
  * @returns An array of identifiable effects.
  */
-export type SideEffectGenerator<S, E> = (oldState: S, newState: S) => SideEffect<E>[];
+export type SideEffectGenerator<S, A, E> = (
+  oldState: S,
+  newState: S,
+  action: Mach.Action<A>
+) => SideEffect<E>[];
 
 /**
  * A function that executes a given effect.
@@ -42,7 +46,7 @@ export type SideEffectConfig<S, A, E> = {
   /** The core logic (pure functions). */
   game: Mach.Game<S, A>;
   /** A pure function to generate effects based on state changes (diffs). */
-  generator: SideEffectGenerator<S, E>;
+  generator: SideEffectGenerator<S,A, E>;
   /** The function that executes the side effects. */
   executor: SideEffectExecutor<E>;
   /** A cache to track processed effect Ids for idempotency.
@@ -71,7 +75,7 @@ export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>
   const next = Mach.run(mach, game, action);
 
   // Plan side effects based on the precise state transition (pure).
-  const effects = generator(prev, next);
+  const effects = generator(prev, next, action);
 
   // Filters unprocessed effects (idempotence before execution)
   const pendingEffects = effects.filter(effect => !idempotencyCache.has(effect.key));
@@ -80,7 +84,7 @@ export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>
     return next; // Nothing to execute
   }
 
-  // Execute effects with an idempotency guard (sequential, simple)
+  // Execute effects with an idempotency guard (sequential)
   for (const effect of pendingEffects) {
     try {
       await executor(effect);

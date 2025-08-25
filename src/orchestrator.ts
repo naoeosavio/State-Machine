@@ -118,6 +118,7 @@ export async function dispatch_with<S, A, E>(
 ): Promise<S> {
   const { mach, game, generator, executor, idempotencyCache } = config;
   const effectExecutor = exec.executor || executor;
+  const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
 
   const prev = Mach.compute(mach, game, action.time);
   const next = Mach.run(mach, game, action);
@@ -130,28 +131,66 @@ export async function dispatch_with<S, A, E>(
   }
 
   switch (exec.strategy) {
-    case 'parallel':
-      try {
-        await Promise.all(pendingEffects.map(effect => effectExecutor(effect)));
-        pendingEffects.forEach(effect => idempotencyCache.add(effect.key));
-      } catch (error) {
-        console.error('Some effects failed during parallel execution:', error);
+    case 'parallel': {
+      // If no concurrency specified, run all in parallel as before
+      if (!maxConcurrency || maxConcurrency >= pendingEffects.length) {
+        try {
+          await Promise.all(pendingEffects.map(effect => effectExecutor(effect)));
+          pendingEffects.forEach(effect => idempotencyCache.add(effect.key));
+        } catch (error) {
+          console.error('Some effects failed during parallel execution:', error);
+        }
+      } else {
+        // Batching approach: run up to maxConcurrency at a time
+        let failed = false;
+        for (let i = 0; i < pendingEffects.length; i += maxConcurrency) {
+          const batch = pendingEffects.slice(i, i + maxConcurrency);
+          try {
+            await Promise.all(batch.map(effect => effectExecutor(effect)));
+          } catch (error) {
+            // Do not mark any keys if any batch fails (all-or-nothing semantics)
+            console.error('Some effects failed during parallel (batched) execution:', error);
+            failed = true;
+            break;
+          }
+        }
+        if (!failed) {
+          pendingEffects.forEach(effect => idempotencyCache.add(effect.key));
+        }
       }
       break;
+    }
 
-    case 'allSettled':
-      const results = await Promise.allSettled(
-        pendingEffects.map(effect => effectExecutor(effect))
-      );
-      results.forEach((result, index) => {
-        const effect = pendingEffects[index];
-        if (result.status === 'fulfilled') {
-          idempotencyCache.add(effect.key);
-        } else {
-          console.error(`Effect execution failed for ${effect.$}:`, result.reason);
+    case 'allSettled': {
+      if (!maxConcurrency || maxConcurrency >= pendingEffects.length) {
+        const results = await Promise.allSettled(
+          pendingEffects.map(effect => effectExecutor(effect))
+        );
+        results.forEach((result, index) => {
+          const effect = pendingEffects[index];
+          if (result.status === 'fulfilled') {
+            idempotencyCache.add(effect.key);
+          } else {
+            console.error(`Effect execution failed for ${effect.$}:`, result.reason);
+          }
+        });
+      } else {
+        // Batched allSettled: settle each batch and mark successes
+        for (let i = 0; i < pendingEffects.length; i += maxConcurrency) {
+          const batch = pendingEffects.slice(i, i + maxConcurrency);
+          const results = await Promise.allSettled(batch.map(effect => effectExecutor(effect)));
+          results.forEach((result, index) => {
+            const effect = batch[index]!;
+            if (result.status === 'fulfilled') {
+              idempotencyCache.add(effect.key);
+            } else {
+              console.error(`Effect execution failed for ${effect.$}:`, result.reason);
+            }
+          });
         }
-      });
+      }
       break;
+    }
   }
 
   return next;

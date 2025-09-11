@@ -76,7 +76,7 @@ export type SideEffectConfig<S, A, E> = {
  * @param action The action to process.
  * @returns The new state.
  */
-export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
+export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
   const { mach, game, generator, executor, idempotencyCache } = config;
 
   // Compute deterministic states around the action
@@ -109,7 +109,7 @@ export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>
 }
 
 
-export async function dispatch_with<S, A, E>(
+export async function orchestrate<S, A, E>(
   config: SideEffectConfig<S, A, E>,
   action: Mach.Action<A>,
   exec: EffectExecOptions<E>

@@ -32,7 +32,7 @@ export type SideEffectGenerator<S, A, E> = (
  * This is where the actual side effect logic resides (e.g., sending an email).
  * @template E The specific type of the effect payload.
  */
-export type SideEffectExecutor<E> = (effect: SideEffect<E>) => Promise<void>;
+export type SideEffectExecutor<E> = (effect: SideEffect<E>) => Promise<void> | void;
 
 /**
  * Configuration options for effect execution strategies.
@@ -79,10 +79,8 @@ export type SideEffectConfig<S, A, E> = {
 export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
   const { mach, game, generator, executor, idempotencyCache } = config;
 
-  // Compute the state up to the action time BEFORE registering the action.
-  // This ensures "prev" reflects the exact pre-action state at that tick,
-  // avoiding diffs that include unrelated tick progression.
-  const prev = Mach.compute(mach, game, action.time);
+  // Compute deterministic states around the action
+  const prev = Mach.get_lasted_state(mach);
 
   // Apply the action and compute the resulting state at the same time boundary.
   const next = Mach.run(mach, game, action);
@@ -97,7 +95,7 @@ export async function dispatch_action<S, A, E>(config: SideEffectConfig<S, A, E>
     return next; // Nothing to execute
   }
 
-  // Execute effects with an idempotency guard (sequential)
+  // Execute effects sequentially; basic path keeps behavior simple
   for (const effect of pendingEffects) {
     try {
       await executor(effect);
@@ -120,7 +118,7 @@ export async function dispatch_with<S, A, E>(
   const effectExecutor = exec.executor || executor;
   const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
 
-  const prev = Mach.compute(mach, game, action.time);
+  const prev = Mach.get_lasted_state(mach);
   const next = Mach.run(mach, game, action);
 
   const effects = generator(prev, next, action);

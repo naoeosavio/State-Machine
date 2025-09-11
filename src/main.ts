@@ -12,7 +12,7 @@ export type Mach<S, A> = {
   cached_tick: Tick,
   state_logs: StateLogs<S>,
   action_logs: ActionLogs<A>,
-   older_state: S,
+  older_state: S,
 };
 
 export type Game<S, A> = {
@@ -182,11 +182,15 @@ export function get_cached_state<S, A>(mach: Mach<S, A>): S | undefined {
   if (mach.cached_tick !== Number.MIN_SAFE_INTEGER) {
     return mach.state_logs[mach.cached_tick];
   }
-  
+
   // If no cached state, return genesis state if it exists
   if (mach.genesis_tick !== Number.MAX_SAFE_INTEGER) {
     return mach.state_logs[mach.genesis_tick];
   }
-  
+
   return undefined;
+}
+
+export function get_lasted_state<S, A>(mach: Mach<S, A>): S {
+  return mach.older_state;
 }

@@ -12,6 +12,7 @@ export type Mach<S, A> = {
   cached_tick: Tick,
   state_logs: StateLogs<S>,
   action_logs: ActionLogs<A>,
+   older_state: S,
 };
 
 export type Game<S, A> = {
@@ -20,8 +21,11 @@ export type Game<S, A> = {
   tick: (state: S) => S,
 };
 
-// TODO: new_mach function
-export function new_mach<S, A>(ticks_per_second: number, max_ms_travel: number): Mach<S, A> {
+export function new_mach<S, A>(
+  game: Game<S, A>,
+  ticks_per_second: number,
+  max_ms_travel: number,
+): Mach<S, A> {
   if (ticks_per_second <= 0) {
     throw new Error("ticks_per_second must be a positive number.");
   }
@@ -36,6 +40,7 @@ export function new_mach<S, A>(ticks_per_second: number, max_ms_travel: number):
     cached_tick: Number.MIN_SAFE_INTEGER,
     state_logs: {},
     action_logs: {},
+    older_state: game.init(),
   };
   mach.max_tick_travel = time_to_tick(mach, max_ms_travel);
   return mach;
@@ -126,6 +131,7 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
     }
   }
 
+  mach.older_state = state;
   return state;
 }
 
@@ -155,11 +161,12 @@ export function deserialize_machine<S, A>(json_string: string): Mach<S, A> {
   return JSON.parse(json_string);
 }
 
-export function reset_machine<S, A>(mach: Mach<S, A>) {
+export function reset_machine<S, A>(mach: Mach<S, A>, game: Game<S, A>) {
   mach.genesis_tick = Number.MAX_SAFE_INTEGER;
   mach.cached_tick = Number.MIN_SAFE_INTEGER;
   mach.state_logs = {};
   mach.action_logs = {};
+  mach.older_state = game.init();
 }
 
 export function get_state_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): S | undefined {

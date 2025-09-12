@@ -80,7 +80,7 @@ export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, actio
   const { mach, game, generator, executor, idempotencyCache } = config;
 
   // Compute deterministic states around the action
-  const prev = Mach.get_lasted_state(mach);
+  const prev = Mach.get_latest_state(mach);
 
   // Apply the action and compute the resulting state at the same time boundary.
   const next = Mach.run(mach, game, action);
@@ -118,7 +118,7 @@ export async function orchestrate<S, A, E>(
   const effectExecutor = exec.executor || executor;
   const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
 
-  const prev = Mach.get_lasted_state(mach);
+  const prev = Mach.get_latest_state(mach);
   const next = Mach.run(mach, game, action);
 
   const effects = generator(prev, next, action);

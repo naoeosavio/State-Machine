@@ -191,6 +191,6 @@ export function get_cached_state<S, A>(mach: Mach<S, A>): S | undefined {
   return undefined;
 }
 
-export function get_lasted_state<S, A>(mach: Mach<S, A>): S {
+export function get_latest_state<S, A>(mach: Mach<S, A>): S {
   return mach.older_state;
 }

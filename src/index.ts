@@ -16,4 +16,4 @@ export { reset_machine } from './main';
 export { get_state_at_tick } from './main';
 export { get_action_at_tick } from './main';
 export { get_cached_state } from './main';
-export { get_lasted_state } from './main';
+export { get_latest_state } from './main';

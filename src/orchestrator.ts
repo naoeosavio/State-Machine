@@ -1,42 +1,45 @@
 
 import * as Mach from './main';
 
-/**
- * A unique identifier for events and effects.
- */
-export type Id = string;
 
 /**
- * Represents a side effect to be executed.
- * @template E The specific type of the effect payload.
+ * Describes a side effect emitted by the game logic.
+ *
+ * The orchestrator only requires a deterministic `key` that uniquely
+ * identifies the effect. Drivers should use this key to implement
+ * idempotency (prevent re‑execution of the same effect). The rest of the
+ * payload (`E`) is application‑defined.
  */
-export type SideEffect<E> = { $: string; key: Id; payload: E };
+export type SideEffect<E> = { key: string } & E;
 
 /**
- * A function that generates a list of effects based on the transition
- * from an old state to a new state.
- * @template S The type of the state.
- * @template E The type of the effect.
- * @param oldState The state before the action was applied.
- * @param newState The state after the action was applied.
- * @returns An array of identifiable effects.
+ * Pure derivation of effects from a state transition.
+ *
+ * Given `prev` → `next` and the triggering `action`, compute the precise
+ * list of effects to run. This function must be pure and deterministic.
+ * The orchestrator ensures both `prev` and `next` are computed at the
+ * same logical time boundary as the action.
  */
 export type SideEffectGenerator<S, A, E> = (
-  oldState: S,
-  newState: S,
+  prev: S,
+  next: S,
   action: Mach.Action<A>
 ) => SideEffect<E>[];
 
 /**
- * A function that executes a given effect.
- * This is where the actual side effect logic resides (e.g., sending an email).
- * @template E The specific type of the effect payload.
+ * Imperative runner for effects (driver‑provided).
+ *
+ * Encapsulates real I/O (HTTP, DB, messaging, etc). Should be safe to
+ * retry; idempotency should be respected if the same effect is executed
+ * more than once by accident.
  */
 export type SideEffectExecutor<E> = (effect: SideEffect<E>) => Promise<void> | void;
 
 /**
- * Configuration options for effect execution strategies.
- * @template E The specific type of the effect payload.
+ * Execution options for advanced orchestration.
+ *
+ * - parallel: run effects concurrently (optionally bounded by `concurrency`).
+ * - allSettled: run concurrently and mark only fulfilled effects as seen.
  */
 export type EffectExecOptions<E> = {
   /** Execution strategy: 'parallel' or 'allSettled' */
@@ -48,10 +51,11 @@ export type EffectExecOptions<E> = {
 };
 
 /**
- * Configuration for side-effect orchestration.
- * @template S The type of the state.
- * @template A The type of the action.
- * @template E The type of the effect.
+ * Driver configuration for side‑effect orchestration.
+ *
+ * The `seen` set is an idempotency cache owned by the driver. In
+ * production it should be backed by durable storage (e.g., Redis/DB)
+ * so effects are not re‑run on restarts.
  */
 export type SideEffectConfig<S, A, E> = {
   /** The state machine instance. */
@@ -62,59 +66,66 @@ export type SideEffectConfig<S, A, E> = {
   generator: SideEffectGenerator<S,A, E>;
   /** The function that executes the side effects. */
   executor: SideEffectExecutor<E>;
-  /** A cache to track processed effect Ids for idempotency.
-   *  For production, a persistent store like Redis or a database is recommended.
-   */
-  idempotencyCache: Set<Id>;
+  /** Idempotency cache used to dedupe effect keys. */
+  seen: Set<string>;
 };
 
 /**
- * A generic driver function that processes an action, updates the state,
- * and orchestrates side effects with idempotency.
+ * dispatch
  *
- * @param config The driver configuration.
- * @param action The action to process.
- * @returns The new state.
+ * Applies one action and executes any derived side effects sequentially.
+ * Effects whose keys are already recorded in `seen` are skipped. Successful
+ * executions add their keys to `seen`, giving at‑least‑once delivery with
+ * simple idempotency.
  */
 export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
-  const { mach, game, generator, executor, idempotencyCache } = config;
+  const { mach, game, generator, executor, seen } = config;
 
-  // Compute deterministic states around the action
+  // Compute deterministic states around the action.
   const prev = Mach.get_latest_state(mach);
-
-  // Apply the action and compute the resulting state at the same time boundary.
   const next = Mach.run(mach, game, action);
 
-  // Plan side effects based on the precise state transition (pure).
+  // Plan side effects from the precise transition (pure).
   const effects = generator(prev, next, action);
 
-  // Filters unprocessed effects (idempotence before execution)
-  const pendingEffects = effects.filter(effect => !idempotencyCache.has(effect.key));
+  // Filter unprocessed effects (pre‑execution idempotency).
+  const pendingEffects = effects.filter(effect => !seen.has(effect.key));
 
   if (pendingEffects.length === 0) {
     return next; // Nothing to execute
   }
 
-  // Execute effects sequentially; basic path keeps behavior simple
+  // Execute effects sequentially; keeps behavior simple and predictable.
   for (const effect of pendingEffects) {
     try {
       await executor(effect);
-      idempotencyCache.add(effect.key);
+      seen.add(effect.key);
     } catch (error) {
-      // Log and continue; at-least-once semantics
-      console.error(`Effect execution failed for ${effect.$}:`, error);
+      // Log and continue; at‑least‑once semantics.
+      console.error(`Effect execution failed for ${effect.key}:`, error);
     }
   }
   return next;
 }
 
 
+/**
+ * orchestrate
+ *
+ * Like `dispatch`, but with configurable strategy and concurrency:
+ *
+ * - parallel: runs the whole batch concurrently (or in fixed‑size batches
+ *   when `concurrency` is provided). If any item in a batch fails, the
+ *   batch is not marked as seen (all‑or‑nothing per batch).
+ * - allSettled: runs concurrently and marks only fulfilled effects as seen;
+ *   failures are logged and can be retried later.
+ */
 export async function orchestrate<S, A, E>(
   config: SideEffectConfig<S, A, E>,
   action: Mach.Action<A>,
   exec: EffectExecOptions<E>
 ): Promise<S> {
-  const { mach, game, generator, executor, idempotencyCache } = config;
+  const { mach, game, generator, executor, seen } = config;
   const effectExecutor = exec.executor || executor;
   const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
 
@@ -122,7 +133,7 @@ export async function orchestrate<S, A, E>(
   const next = Mach.run(mach, game, action);
 
   const effects = generator(prev, next, action);
-  const pendingEffects = effects.filter(effect => !idempotencyCache.has(effect.key));
+  const pendingEffects = effects.filter(effect => !seen.has(effect.key));
 
   if (pendingEffects.length === 0) {
     return next;
@@ -134,7 +145,7 @@ export async function orchestrate<S, A, E>(
       if (!maxConcurrency || maxConcurrency >= pendingEffects.length) {
         try {
           await Promise.all(pendingEffects.map(effect => effectExecutor(effect)));
-          pendingEffects.forEach(effect => idempotencyCache.add(effect.key));
+          pendingEffects.forEach(effect => seen.add(effect.key));
         } catch (error) {
           console.error('Some effects failed during parallel execution:', error);
         }
@@ -153,7 +164,7 @@ export async function orchestrate<S, A, E>(
           }
         }
         if (!failed) {
-          pendingEffects.forEach(effect => idempotencyCache.add(effect.key));
+          pendingEffects.forEach(effect => seen.add(effect.key));
         }
       }
       break;
@@ -167,9 +178,9 @@ export async function orchestrate<S, A, E>(
         results.forEach((result, index) => {
           const effect = pendingEffects[index];
           if (result.status === 'fulfilled') {
-            idempotencyCache.add(effect.key);
+            seen.add(effect.key);
           } else {
-            console.error(`Effect execution failed for ${effect.$}:`, result.reason);
+            console.error(`Effect execution failed for ${effect.key}:`, result.reason);
           }
         });
       } else {
@@ -180,9 +191,9 @@ export async function orchestrate<S, A, E>(
           results.forEach((result, index) => {
             const effect = batch[index]!;
             if (result.status === 'fulfilled') {
-              idempotencyCache.add(effect.key);
+              seen.add(effect.key);
             } else {
-              console.error(`Effect execution failed for ${effect.$}:`, result.reason);
+              console.error(`Effect execution failed for ${effect.key}:`, result.reason);
             }
           });
         }

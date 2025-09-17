@@ -36,6 +36,16 @@ export type SideEffectGenerator<S, A, E> = (
 export type SideEffectExecutor<E> = (effect: SideEffect<E>) => Promise<void> | void;
 
 /**
+ * Optional logger used by the orchestrator. Defaults to `console`.
+ */
+export type Logger = {
+  info?: (...args: any[]) => void;
+  error?: (...args: any[]) => void;
+  warn?: (...args: any[]) => void;
+  debug?: (...args: any[]) => void;
+};
+
+/**
  * Execution options for advanced orchestration.
  *
  * - parallel: run effects concurrently (optionally bounded by `concurrency`).
@@ -68,6 +78,8 @@ export type SideEffectConfig<S, A, E> = {
   executor: SideEffectExecutor<E>;
   /** Idempotency cache used to dedupe effect keys. */
   seen: Set<string>;
+  /** Optional logger implementation. */
+  logger?: Logger;
 };
 
 /**
@@ -79,7 +91,7 @@ export type SideEffectConfig<S, A, E> = {
  * simple idempotency.
  */
 export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
-  const { mach, game, generator, executor, seen } = config;
+  const { mach, game, generator, executor, seen, logger } = config;
 
   // Compute deterministic states around the action.
   const prev = Mach.get_latest_state(mach);
@@ -102,7 +114,7 @@ export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, actio
       seen.add(effect.key);
     } catch (error) {
       // Log and continue; at‑least‑once semantics.
-      console.error(`Effect execution failed for ${effect.key}:`, error);
+      (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, error);
     }
   }
   return next;
@@ -125,7 +137,7 @@ export async function orchestrate<S, A, E>(
   action: Mach.Action<A>,
   exec: EffectExecOptions<E>
 ): Promise<S> {
-  const { mach, game, generator, executor, seen } = config;
+  const { mach, game, generator, executor, seen, logger } = config;
   const effectExecutor = exec.executor || executor;
   const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
 
@@ -147,7 +159,7 @@ export async function orchestrate<S, A, E>(
           await Promise.all(pendingEffects.map(effect => effectExecutor(effect)));
           pendingEffects.forEach(effect => seen.add(effect.key));
         } catch (error) {
-          console.error('Some effects failed during parallel execution:', error);
+          (logger?.error || console.error)('Some effects failed during parallel execution:', error);
         }
       } else {
         // Batching approach: run up to maxConcurrency at a time
@@ -158,7 +170,7 @@ export async function orchestrate<S, A, E>(
             await Promise.all(batch.map(effect => effectExecutor(effect)));
           } catch (error) {
             // Do not mark any keys if any batch fails (all-or-nothing semantics)
-            console.error('Some effects failed during parallel (batched) execution:', error);
+            (logger?.error || console.error)('Some effects failed during parallel (batched) execution:', error);
             failed = true;
             break;
           }
@@ -180,7 +192,7 @@ export async function orchestrate<S, A, E>(
           if (result.status === 'fulfilled') {
             seen.add(effect.key);
           } else {
-            console.error(`Effect execution failed for ${effect.key}:`, result.reason);
+            (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, result.reason);
           }
         });
       } else {
@@ -193,7 +205,7 @@ export async function orchestrate<S, A, E>(
             if (result.status === 'fulfilled') {
               seen.add(effect.key);
             } else {
-              console.error(`Effect execution failed for ${effect.key}:`, result.reason);
+              (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, result.reason);
             }
           });
         }

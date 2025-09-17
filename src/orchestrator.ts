@@ -82,6 +82,54 @@ export type SideEffectConfig<S, A, E> = {
   logger?: Logger;
 };
 
+
+
+
+/**
+ * Minimal store abstraction to allow swapping the in-memory Set with a durable backend.
+ */
+export type EffectStore = {
+  has: (key: string) => boolean;
+  add: (key: string) => void;
+  delete?: (key: string) => void;
+  clear?: () => void;
+  size?: () => number;
+};
+
+/** Wrap a Set<string> as an EffectStore (compat helper). */
+export function set_store(set: Set<string>): EffectStore {
+  return {
+    has: (k) => set.has(k),
+    add: (k) => void set.add(k),
+    delete: (k) => void set.delete(k),
+    clear: () => void set.clear(),
+    size: () => set.size,
+  };
+}
+
+/** Create a simple in-memory store. */
+export function new_memory_store(): EffectStore {
+  const inner = new Set<string>();
+  return set_store(inner);
+}
+
+/**
+ * Detailed report for an execution run.
+ */
+export type EffectExecution<E> = {
+  effect: SideEffect<E>;
+  status: 'executed' | 'skipped' | 'failed';
+  error?: unknown;
+};
+
+export type ExecutionReport<E> = {
+  total: number;
+  executed: number;
+  skipped: number;
+  failed: number;
+  items: EffectExecution<E>[];
+};
+
 /**
  * dispatch
  *
@@ -215,4 +263,46 @@ export async function orchestrate<S, A, E>(
   }
 
   return next;
+}
+
+/**
+ * dispatch_with_report
+ *
+ * Sequential execution with a detailed report per effect.
+ */
+export async function dispatch_with_report<S, A, E>(
+  config: SideEffectConfig<S, A, E>,
+  action: Mach.Action<A>
+): Promise<{ state: S; report: ExecutionReport<E> }> {
+  const { mach, game, generator, executor, seen, logger } = config;
+  const prev = Mach.get_latest_state(mach);
+  const next = Mach.run(mach, game, action);
+  const effects = generator(prev, next, action);
+  const pendingEffects = effects.filter(effect => !seen.has(effect.key));
+
+  const items: EffectExecution<E>[] = [];
+  for (const effect of effects) {
+    if (seen.has(effect.key)) {
+      items.push({ effect, status: 'skipped' });
+      continue;
+    }
+    try {
+      await executor(effect);
+      seen.add(effect.key);
+      items.push({ effect, status: 'executed' });
+    } catch (error) {
+      (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, error);
+      items.push({ effect, status: 'failed', error });
+    }
+  }
+
+  const report: ExecutionReport<E> = {
+    total: effects.length,
+    executed: items.filter(i => i.status === 'executed').length,
+    skipped: items.filter(i => i.status === 'skipped').length,
+    failed: items.filter(i => i.status === 'failed').length,
+    items,
+  };
+
+  return { state: next, report };
 }

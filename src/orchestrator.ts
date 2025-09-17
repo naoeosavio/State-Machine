@@ -306,3 +306,131 @@ export async function dispatch_with_report<S, A, E>(
 
   return { state: next, report };
 }
+
+/**
+ * orchestrate_with_report
+ *
+ * Same strategies as `orchestrate` but returns a report for observability.
+ */
+export async function orchestrate_with_report<S, A, E>(
+  config: SideEffectConfig<S, A, E>,
+  action: Mach.Action<A>,
+  exec: EffectExecOptions<E>
+): Promise<{ state: S; report: ExecutionReport<E> }> {
+  const { mach, game, generator, executor, seen, logger } = config;
+  const effectExecutor = exec.executor || executor;
+  const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
+
+  const prev = Mach.get_latest_state(mach);
+  const next = Mach.run(mach, game, action);
+  const effects = generator(prev, next, action);
+  const pending = effects.filter(e => !seen.has(e.key));
+
+  const items: EffectExecution<E>[] = [];
+  // mark pre-known skipped
+  for (const e of effects) {
+    if (seen.has(e.key)) items.push({ effect: e, status: 'skipped' });
+  }
+
+  if (pending.length === 0) {
+    return {
+      state: next,
+      report: {
+        total: effects.length,
+        executed: 0,
+        skipped: items.length,
+        failed: 0,
+        items,
+      },
+    };
+  }
+
+  const pushExecuted = (e: SideEffect<E>) => items.push({ effect: e, status: 'executed' });
+  const pushFailed = (e: SideEffect<E>, error: unknown) => items.push({ effect: e, status: 'failed', error });
+
+  switch (exec.strategy) {
+    case 'parallel': {
+      if (!maxConcurrency || maxConcurrency >= pending.length) {
+        try {
+          await Promise.all(pending.map(effectExecutor));
+          pending.forEach(e => { seen.add(e.key); pushExecuted(e); });
+        } catch (error) {
+          (logger?.error || console.error)('Some effects failed during parallel execution:', error);
+          // none marked
+        }
+      } else {
+        let failed = false;
+        for (let i = 0; i < pending.length; i += maxConcurrency) {
+          const batch = pending.slice(i, i + maxConcurrency);
+          try {
+            await Promise.all(batch.map(effectExecutor));
+          } catch (error) {
+            (logger?.error || console.error)('Some effects failed during parallel (batched) execution:', error);
+            failed = true;
+            break;
+          }
+        }
+        if (!failed) {
+          pending.forEach(e => { seen.add(e.key); pushExecuted(e); });
+        }
+      }
+      break;
+    }
+    case 'allSettled': {
+      if (!maxConcurrency || maxConcurrency >= pending.length) {
+        const results = await Promise.allSettled(pending.map(effectExecutor));
+        results.forEach((r, i) => {
+          const e = pending[i]!;
+          if (r.status === 'fulfilled') {
+            seen.add(e.key); pushExecuted(e);
+          } else {
+            (logger?.error || console.error)(`Effect execution failed for ${e.key}:`, r.reason);
+            pushFailed(e, r.reason);
+          }
+        });
+      } else {
+        for (let i = 0; i < pending.length; i += maxConcurrency) {
+          const batch = pending.slice(i, i + maxConcurrency);
+          const results = await Promise.allSettled(batch.map(effectExecutor));
+          results.forEach((r, j) => {
+            const e = batch[j]!;
+            if (r.status === 'fulfilled') {
+              seen.add(e.key); pushExecuted(e);
+            } else {
+              (logger?.error || console.error)(`Effect execution failed for ${e.key}:`, r.reason);
+              pushFailed(e, r.reason);
+            }
+          });
+        }
+      }
+      break;
+    }
+  }
+
+  const report: ExecutionReport<E> = {
+    total: effects.length,
+    executed: items.filter(i => i.status === 'executed').length,
+    skipped: items.filter(i => i.status === 'skipped').length,
+    failed: items.filter(i => i.status === 'failed').length,
+    items,
+  };
+
+  return { state: next, report };
+}
+
+/**
+ * create_orchestrator
+ *
+ * Convenience factory that binds config and exposes a small, typed API.
+ */
+export function create_orchestrator<S, A, E>(config: SideEffectConfig<S, A, E>) {
+  return {
+    dispatch: (action: Mach.Action<A>) => dispatch(config, action),
+    orchestrate: (action: Mach.Action<A>, exec: EffectExecOptions<E>) => orchestrate(config, action, exec),
+    dispatch_with_report: (action: Mach.Action<A>) => dispatch_with_report(config, action),
+    orchestrate_with_report: (action: Mach.Action<A>, exec: EffectExecOptions<E>) => orchestrate_with_report(config, action, exec),
+    preload_seen: (keys: string[]) => { keys.forEach(k => config.seen.add(k)); },
+    clear_seen: () => { config.seen.clear(); },
+    get_seen_size: () => config.seen.size,
+  };
+}

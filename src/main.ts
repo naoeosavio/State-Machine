@@ -12,7 +12,7 @@ export type Mach<S, A> = {
   cached_tick: Tick,
   state_logs: StateLogs<S>,
   action_logs: ActionLogs<A>,
-  older_state: S,
+  last_state: S,
 };
 
 export type Game<S, A> = {
@@ -40,14 +40,14 @@ export function new_mach<S, A>(
     cached_tick: Number.MIN_SAFE_INTEGER,
     state_logs: {},
     action_logs: {},
-    older_state: game.init(),
+    last_state: game.init(),
   };
   mach.max_tick_travel = time_to_tick(mach, max_ms_travel);
   return mach;
 }
 
 export function time_to_tick<S, A>(mach: Mach<S, A>, time: Time): Tick {
-  return Math.floor((time * mach.ticks_per_second) / 1000);
+  return Math.floor((time / 1000) * mach.ticks_per_second);
 }
 
 // Inserts an action into action_logs, sorting by time
@@ -58,7 +58,7 @@ function insertOrdered<A>(
   let low = 0;
   let high = action_logs.length;
   while (low < high) {
-    const mid = Math.floor((low + high) / 2);
+    const mid = (low + high) >>> 1;
     if (action_logs[mid]!.time < action.time) {
       low = mid + 1;
     } else {
@@ -131,7 +131,7 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
     }
   }
 
-  mach.older_state = state;
+  mach.last_state = state;
   return state;
 }
 
@@ -166,7 +166,7 @@ export function reset_machine<S, A>(mach: Mach<S, A>, game: Game<S, A>) {
   mach.cached_tick = Number.MIN_SAFE_INTEGER;
   mach.state_logs = {};
   mach.action_logs = {};
-  mach.older_state = game.init();
+  mach.last_state = game.init();
 }
 
 export function get_state_at_tick<S, A>(mach: Mach<S, A>, tick: Tick): S | undefined {
@@ -192,5 +192,5 @@ export function get_cached_state<S, A>(mach: Mach<S, A>): S | undefined {
 }
 
 export function get_latest_state<S, A>(mach: Mach<S, A>): S {
-  return mach.older_state;
+  return mach.last_state;
 }

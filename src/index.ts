@@ -17,3 +17,22 @@ export { get_state_at_tick } from './main';
 export { get_action_at_tick } from './main';
 export { get_cached_state } from './main';
 export { get_latest_state } from './main';
+// Orchestrator exports
+export {
+  SideEffect,
+  SideEffectGenerator,
+  SideEffectExecutor,
+  Logger,
+  EffectExecOptions,
+  SideEffectConfig,
+  EffectStore,
+  set_store,
+  new_memory_store,
+  EffectExecution,
+  ExecutionReport,
+  dispatch,
+  orchestrate,
+  dispatch_with_report,
+  orchestrate_with_report,
+  create_orchestrator,
+} from './orchestrator';

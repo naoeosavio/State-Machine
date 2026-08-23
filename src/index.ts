@@ -6,6 +6,8 @@ export { Mach } from './main';
 export { Game } from './main';
 export { new_mach } from './main';
 export { time_to_tick } from './main';
+export { tick_to_time } from './main';
+export { stable_stringify } from './main';
 export { register_action } from './main';
 export { compute } from './main';
 export { run } from './main';
@@ -36,3 +38,28 @@ export {
   orchestrate_with_report,
   create_orchestrator,
 } from './orchestrator';
+// Layer2 exports
+export {
+  Hash,
+  ActionId,
+  SchemaVersion,
+  SnapshotId,
+  LockToken,
+  Layer2Config,
+  ImmutableLogEntry,
+  Snapshot,
+  SchemaMigration,
+  Lock,
+  Layer2,
+  create_layer2,
+} from './layer2';
+// BigInt fixed-point math exports
+export {
+  Fixed,
+  create_fixed,
+  rescale,
+  add,
+  subtract,
+  multiply,
+  to_string,
+} from './bigint_math';

@@ -50,6 +50,10 @@ export function time_to_tick<S, A>(mach: Mach<S, A>, time: Time): Tick {
   return Math.floor((time / 1000) * mach.ticks_per_second);
 }
 
+export function tick_to_time(tick: Tick, ticks_per_second: number): Time {
+  return (tick * 1000) / ticks_per_second;
+}
+
 // Inserts an action into action_logs, sorting by time
 function insertOrdered<A>(
   action_logs: Action<A>[],
@@ -68,10 +72,17 @@ function insertOrdered<A>(
   action_logs.splice(low, 0, action);
 }
 
+// JSON that tolerates BigInt values (serialized as strings)
+export function stable_stringify(value: any): string {
+  return JSON.stringify(value, (_, v) =>
+    typeof v === 'bigint' ? v.toString() + 'n' : v
+  );
+}
+
 export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>) {
   var time = action.time;
   var tick = time_to_tick(mach, time);
-  var hash = JSON.stringify(action);
+  var hash = stable_stringify(action);
 
   // Initilize this tick's actions
   if (!mach.action_logs[tick]) {
@@ -86,7 +97,7 @@ export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>) {
 
   // If the message is duplicated, skip it
   for (let action of actions) {
-    if (JSON.stringify(action) == hash) {
+    if (stable_stringify(action) == hash) {
       return;
     }
   }

@@ -10,6 +10,8 @@ State Machine is a lightweight, deterministic state management system designed f
 - Efficient state caching
 - Support for custom game logic
 - Ability to rollback and recalculate states
+- Pure side-effect orchestration with idempotency
+- Layer2: hash-chained log, snapshots, replay, locks
 
 ## Installation
 
@@ -50,7 +52,7 @@ This system is particularly useful for multiplayer games where precise synchroni
 ### Usage
 
 ```typescript
-import { new_mach, register_action, compute, Mach, Game, Time } from 'state-machine';
+import { new_mach, register_action, compute, Mach, Game, Time } from '@uwu-games/uwu-state-machine';
 
 // Definition of State and Action types
 type State = { /* ... */ };
@@ -83,8 +85,8 @@ function tick(state: State): State {
 
 // Create a new Game instance 
 const game: Game<State, Action> = { init, tick, when };
-// Create a new Mach instance
-const mach: Mach<State, Action> = new_mach(60); // 60 ticks per second
+// Create a new Mach instance (60 ticks per second, max 1000ms of rollback travel)
+const mach: Mach<State, Action> = new_mach(game, 60, 1000);
 
 // Register actions
 register_action(mach, { $: "SetNick", time: 1000, pid: "player1", name: "Alice" });
@@ -95,3 +97,34 @@ const state = compute(mach, game, 2000);
 ```
 
 This system is particularly useful for multiplayer games where precise synchronization and the ability to replay previous states are crucial.
+
+### Side Effects (Orchestrator)
+
+Side effects stay out of the pure core. A generator derives effects from the `(prev, next, action)`
+transition, an executor runs them, and a `seen` store provides idempotency:
+
+```typescript
+import { create_orchestrator, new_memory_store } from '@uwu-games/uwu-state-machine';
+
+const orchestrator = create_orchestrator({
+  mach, game,
+  generator: (prev, next, action) => next.score > prev.score ? [{ key: `score-${action.time}` }] : [],
+  executor: async (effect) => { /* HTTP, DB, messaging... */ },
+  seen: new_memory_store(),
+});
+
+await orchestrator.dispatch(action); // or orchestrate with 'parallel'/'allSettled' strategies
+```
+
+### Layer2 (Immutable Log & Snapshots)
+
+`create_layer2` wraps a machine with a hash‑chained append‑only log (SHA‑256/512), periodic snapshots,
+deterministic replay from any snapshot, schema migrations, and resource locks:
+
+```typescript
+import { create_layer2 } from '@uwu-games/uwu-state-machine';
+
+const layer2 = create_layer2(mach, game, { snapshot_interval: 100 });
+layer2.register_action_with_id(action, 'unique-action-id'); // idempotent by actionId
+layer2.get_chain_integrity(); // verifies hash chain
+```

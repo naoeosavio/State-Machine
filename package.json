@@ -8,9 +8,12 @@
     "dist"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "clean": "rimraf dist",
-    "build": "npm run clean && tsc --declaration"
+    "build": "npm run clean && tsc --declaration",
+    "test": "npm run test:main && npm run test:orchestrator && npm run test:layer2",
+    "test:main": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/main.test.ts",
+    "test:orchestrator": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/orchestrator.test.ts",
+    "test:layer2": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/layer2.test.ts"
   },
   "repository": {
     "type": "git",
@@ -30,6 +33,9 @@
   },
   "homepage": "https://github.com/UwU-Jogos/State-Machine#readme",
   "devDependencies": {
+    "@types/node": "20.19.43",
+    "rimraf": "5.0.10",
+    "ts-node": "10.9.2",
     "typescript": "^5.5.4"
   },
   "publishConfig": {

@@ -1,5 +1,6 @@
 import * as Mach from '../src/main';
 import * as Orchestrator from '../src/orchestrator';
+import { isDone, val } from 'lite-fp';
 import { assert, describe, it, run_all_tests } from './test_utils';
 
 // --- Test Setup ---
@@ -68,7 +69,9 @@ describe('Orchestrator.dispatch', () => {
 
     const action: Mach.Action<Action> = { type: 'INC', amount: 5, time: 100 };
 
-    const finalState = await Orchestrator.dispatch(config, action);
+    const result = await Orchestrator.dispatch(config, action);
+    if (!isDone(result)) throw new Error('dispatch should succeed');
+    const finalState = val(result);
 
     assert.ok(finalState.count === 5, `Final state should be 5, but was ${finalState.count}`);
     assert.ok(executedEffects.length === 1, 'Executor should be called once');
@@ -92,7 +95,9 @@ describe('Orchestrator.dispatch', () => {
     seen.add('inc-to-10-INC-at-200');
 
     const action: Mach.Action<Action> = { type: 'INC', amount: 10, time: 200 };
-    const finalState = await Orchestrator.dispatch(config, action);
+    const result = await Orchestrator.dispatch(config, action);
+    if (!isDone(result)) throw new Error('dispatch should succeed');
+    const finalState = val(result);
 
     assert.ok(finalState.count === 10, 'State should still be updated');
     assert.ok(executedEffects.length === 0, 'Executor should not be called for a cached effect key');
@@ -167,7 +172,7 @@ describe('Orchestrator.dispatch', () => {
     assert.ok(snapshot.next === 6, `newState should be 6 (post-tick + action), got ${snapshot.next}`);
   });
 
-  it('orchestrate parallel marks none if any fail', async () => {
+  it('orchestrate parallel marks only fulfilled effects', async () => {
     type S = { n: number };
     type A = { type: 'BUMP' };
     type E = { label: string };
@@ -197,7 +202,8 @@ describe('Orchestrator.dispatch', () => {
 
     await Orchestrator.orchestrate(cfg, { type: 'BUMP', time: 1 }, { strategy: 'parallel' });
 
-    assert.ok(!seen.has('ok-1') && !seen.has('fail-1'), 'No keys should be added on parallel failure');
+    assert.ok(seen.has('ok-1'), 'Fulfilled effect should be marked');
+    assert.ok(!seen.has('fail-1'), 'Failed effect must stay unmarked for retry');
     assert.ok(executed.length === 2, 'Both effects attempted');
   });
 
@@ -238,7 +244,9 @@ describe('Orchestrator.dispatch', () => {
     seen.add(`k1-3`);
     const exec: Orchestrator.SideEffectExecutor<E> = async (_e) => {};
     const mach = Mach.new_mach<S, A>(game2,60, 1000);
-    const { report } = await Orchestrator.dispatch_with_report({ mach, game: game2, generator: gen, executor: exec, seen }, { type: 'X', time: 3 });
+    const outcome = await Orchestrator.dispatch_with_report({ mach, game: game2, generator: gen, executor: exec, seen }, { type: 'X', time: 3 });
+    if (!isDone(outcome)) throw new Error('report dispatch should succeed');
+    const { report } = val(outcome);
     assert.ok(report.total === 2, 'Two effects total');
     assert.ok(report.skipped === 1 && report.executed === 1, 'One skipped, one executed');
   });

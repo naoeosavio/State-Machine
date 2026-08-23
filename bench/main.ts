@@ -1,6 +1,7 @@
 
 
-import { new_mach, run, compute, register_action } from "../src/main";
+import { new_mach, run } from "../src/main";
+import { isDone, val } from "lite-fp";
 
 // Simple benchmark runner
 async function bench(name: string, fn: () => void, count: number = 100) {
@@ -48,7 +49,8 @@ async function main() {
   const run_mach_no_rollback = new_mach<MyState, MyAction>(game,60, 10000);
   let run_time_no_rollback = 0;
   await bench("run (sequential)", () => {
-    console.log(run(run_mach_no_rollback, game, { time: run_time_no_rollback++, type: "add", value: 1 }))
+    const result = run(run_mach_no_rollback, game, { time: run_time_no_rollback++, type: "add", value: 1 });
+    if (isDone(result)) console.log(val(result))
   });
 
 //   // For the rollback test, we set up the machine inside the loop to ensure

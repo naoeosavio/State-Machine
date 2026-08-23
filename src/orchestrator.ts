@@ -1,5 +1,19 @@
 
 import * as Mach from './main';
+import { done, fail, isDone, isFail, err, val, type Result } from 'lite-fp';
+
+/**
+ * Captures an async effect outcome as an explicit Result instead of letting
+ * rejections escape into hidden promise state.
+ */
+async function attempt_effect<E>(executor: SideEffectExecutor<E>, effect: SideEffect<E>): Promise<Result<true, unknown>> {
+  try {
+    await executor(effect);
+    return done(true);
+  } catch (error) {
+    return fail(error);
+  }
+}
 
 
 /**
@@ -119,6 +133,8 @@ export function new_memory_store(): EffectStore {
 export type EffectExecution<E> = {
   effect: SideEffect<E>;
   status: 'executed' | 'skipped' | 'failed';
+  /** Present for attempted effects: Done on success, Fail carrying the error. */
+  result?: Result<true, unknown>;
   error?: unknown;
 };
 
@@ -134,16 +150,21 @@ export type ExecutionReport<E> = {
  * dispatch
  *
  * Applies one action and executes any derived side effects sequentially.
- * Effects whose keys are already recorded in `seen` are skipped. Successful
- * executions add their keys to `seen`, giving at‑least‑once delivery with
- * simple idempotency.
+ * Effects whose keys are already recorded in `seen` are skipped. Only `Done`
+ * outcomes mark their keys in `seen` — at-least-once delivery with explicit
+ * per-effect results. Core failures (e.g. ACTION_IN_PAST) short-circuit as
+ * Err before any effect runs.
  */
-export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<S> {
+export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, action: Mach.Action<A>): Promise<Result<S, Mach.MachError>> {
   const { mach, game, generator, executor, seen, logger } = config;
 
   // Compute deterministic states around the action.
   const prev = Mach.get_latest_state(mach);
-  const next = Mach.run(mach, game, action);
+  const next_result = Mach.run(mach, game, action);
+  if (isFail(next_result)) {
+    return next_result;
+  }
+  const next = val(next_result);
 
   // Plan side effects from the precise transition (pure).
   const effects = generator(prev, next, action);
@@ -152,147 +173,119 @@ export async function dispatch<S, A, E>(config: SideEffectConfig<S, A, E>, actio
   const pendingEffects = effects.filter(effect => !seen.has(effect.key));
 
   if (pendingEffects.length === 0) {
-    return next; // Nothing to execute
+    return done(next); // Nothing to execute
   }
 
-  // Execute effects sequentially; keeps behavior simple and predictable.
+  // Execute effects sequentially with explicit outcome capture.
   for (const effect of pendingEffects) {
-    try {
-      await executor(effect);
+    const outcome = await attempt_effect(executor, effect);
+    if (isDone(outcome)) {
       seen.add(effect.key);
-    } catch (error) {
+    } else {
       // Log and continue; at‑least‑once semantics.
-      (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, error);
+      (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, err(outcome));
     }
   }
-  return next;
+  return done(next);
 }
 
 
 /**
  * orchestrate
  *
- * Like `dispatch`, but with configurable strategy and concurrency:
+ * Like dispatch, but with configurable strategy and concurrency:
  *
- * - parallel: runs the whole batch concurrently (or in fixed‑size batches
- *   when `concurrency` is provided). If any item in a batch fails, the
- *   batch is not marked as seen (all‑or‑nothing per batch).
- * - allSettled: runs concurrently and marks only fulfilled effects as seen;
- *   failures are logged and can be retried later.
+ * - parallel: runs the whole batch concurrently (or fixed-size batches when
+ *   `concurrency` is provided).
+ * - allSettled: identical outcome capture; kept for API compatibility.
+ *
+ * In both strategies every effect outcome is captured as a Result and ONLY
+ * fulfilled effects are marked in `seen`; failures are logged for retry.
  */
 export async function orchestrate<S, A, E>(
   config: SideEffectConfig<S, A, E>,
   action: Mach.Action<A>,
   exec: EffectExecOptions<E>
-): Promise<S> {
+): Promise<Result<S, Mach.MachError>> {
   const { mach, game, generator, executor, seen, logger } = config;
   const effectExecutor = exec.executor || executor;
   const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
 
   const prev = Mach.get_latest_state(mach);
-  const next = Mach.run(mach, game, action);
+  const next_result = Mach.run(mach, game, action);
+  if (isFail(next_result)) {
+    return next_result;
+  }
+  const next = val(next_result);
 
   const effects = generator(prev, next, action);
   const pendingEffects = effects.filter(effect => !seen.has(effect.key));
 
   if (pendingEffects.length === 0) {
-    return next;
+    return done(next);
   }
+
+  const run_batch = async (batch: SideEffect<E>[]) => {
+    const outcomes = await Promise.all(batch.map(effect => attempt_effect(effectExecutor, effect)));
+    outcomes.forEach((outcome, index) => {
+      const effect = batch[index]!;
+      if (isDone(outcome)) {
+        seen.add(effect.key);
+      } else {
+        (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, err(outcome));
+      }
+    });
+  };
 
   switch (exec.strategy) {
-    case 'parallel': {
-      // If no concurrency specified, run all in parallel as before
-      if (!maxConcurrency || maxConcurrency >= pendingEffects.length) {
-        try {
-          await Promise.all(pendingEffects.map(effect => effectExecutor(effect)));
-          pendingEffects.forEach(effect => seen.add(effect.key));
-        } catch (error) {
-          (logger?.error || console.error)('Some effects failed during parallel execution:', error);
-        }
-      } else {
-        // Batching approach: run up to maxConcurrency at a time
-        let failed = false;
-        for (let i = 0; i < pendingEffects.length; i += maxConcurrency) {
-          const batch = pendingEffects.slice(i, i + maxConcurrency);
-          try {
-            await Promise.all(batch.map(effect => effectExecutor(effect)));
-          } catch (error) {
-            // Do not mark any keys if any batch fails (all-or-nothing semantics)
-            (logger?.error || console.error)('Some effects failed during parallel (batched) execution:', error);
-            failed = true;
-            break;
-          }
-        }
-        if (!failed) {
-          pendingEffects.forEach(effect => seen.add(effect.key));
-        }
-      }
-      break;
-    }
-
+    case 'parallel':
     case 'allSettled': {
       if (!maxConcurrency || maxConcurrency >= pendingEffects.length) {
-        const results = await Promise.allSettled(
-          pendingEffects.map(effect => effectExecutor(effect))
-        );
-        results.forEach((result, index) => {
-          const effect = pendingEffects[index];
-          if (result.status === 'fulfilled') {
-            seen.add(effect.key);
-          } else {
-            (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, result.reason);
-          }
-        });
+        await run_batch(pendingEffects);
       } else {
-        // Batched allSettled: settle each batch and mark successes
         for (let i = 0; i < pendingEffects.length; i += maxConcurrency) {
-          const batch = pendingEffects.slice(i, i + maxConcurrency);
-          const results = await Promise.allSettled(batch.map(effect => effectExecutor(effect)));
-          results.forEach((result, index) => {
-            const effect = batch[index]!;
-            if (result.status === 'fulfilled') {
-              seen.add(effect.key);
-            } else {
-              (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, result.reason);
-            }
-          });
+          await run_batch(pendingEffects.slice(i, i + maxConcurrency));
         }
       }
       break;
     }
   }
 
-  return next;
+  return done(next);
 }
 
 /**
  * dispatch_with_report
  *
- * Sequential execution with a detailed report per effect.
+ * Sequential execution with a detailed per-effect report; every attempted
+ * effect carries its explicit Result in `items`.
  */
 export async function dispatch_with_report<S, A, E>(
   config: SideEffectConfig<S, A, E>,
   action: Mach.Action<A>
-): Promise<{ state: S; report: ExecutionReport<E> }> {
+): Promise<Result<{ state: S; report: ExecutionReport<E> }, Mach.MachError>> {
   const { mach, game, generator, executor, seen, logger } = config;
   const prev = Mach.get_latest_state(mach);
-  const next = Mach.run(mach, game, action);
-  const effects = generator(prev, next, action);
-  const pendingEffects = effects.filter(effect => !seen.has(effect.key));
+  const next_result = Mach.run(mach, game, action);
+  if (isFail(next_result)) {
+    return next_result;
+  }
+  const next = val(next_result);
 
+  const effects = generator(prev, next, action);
   const items: EffectExecution<E>[] = [];
   for (const effect of effects) {
     if (seen.has(effect.key)) {
       items.push({ effect, status: 'skipped' });
       continue;
     }
-    try {
-      await executor(effect);
+    const outcome = await attempt_effect(executor, effect);
+    if (isDone(outcome)) {
       seen.add(effect.key);
-      items.push({ effect, status: 'executed' });
-    } catch (error) {
-      (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, error);
-      items.push({ effect, status: 'failed', error });
+      items.push({ effect, status: 'executed', result: outcome });
+    } else {
+      (logger?.error || console.error)(`Effect execution failed for ${effect.key}:`, err(outcome));
+      items.push({ effect, status: 'failed', error: err(outcome), result: outcome });
     }
   }
 
@@ -304,7 +297,7 @@ export async function dispatch_with_report<S, A, E>(
     items,
   };
 
-  return { state: next, report };
+  return done({ state: next, report });
 }
 
 /**
@@ -316,13 +309,18 @@ export async function orchestrate_with_report<S, A, E>(
   config: SideEffectConfig<S, A, E>,
   action: Mach.Action<A>,
   exec: EffectExecOptions<E>
-): Promise<{ state: S; report: ExecutionReport<E> }> {
+): Promise<Result<{ state: S; report: ExecutionReport<E> }, Mach.MachError>> {
   const { mach, game, generator, executor, seen, logger } = config;
   const effectExecutor = exec.executor || executor;
   const maxConcurrency = Math.max(1, exec.concurrency ?? 0) || undefined;
 
   const prev = Mach.get_latest_state(mach);
-  const next = Mach.run(mach, game, action);
+  const next_result = Mach.run(mach, game, action);
+  if (isFail(next_result)) {
+    return next_result;
+  }
+  const next = val(next_result);
+
   const effects = generator(prev, next, action);
   const pending = effects.filter(e => !seen.has(e.key));
 
@@ -333,7 +331,7 @@ export async function orchestrate_with_report<S, A, E>(
   }
 
   if (pending.length === 0) {
-    return {
+    return done({
       state: next,
       report: {
         total: effects.length,
@@ -342,65 +340,31 @@ export async function orchestrate_with_report<S, A, E>(
         failed: 0,
         items,
       },
-    };
+    });
   }
 
-  const pushExecuted = (e: SideEffect<E>) => items.push({ effect: e, status: 'executed' });
-  const pushFailed = (e: SideEffect<E>, error: unknown) => items.push({ effect: e, status: 'failed', error });
+  const record_batch = async (batch: SideEffect<E>[]) => {
+    const outcomes = await Promise.all(batch.map(effect => attempt_effect(effectExecutor, effect)));
+    outcomes.forEach((outcome, index) => {
+      const e = batch[index]!;
+      if (isDone(outcome)) {
+        seen.add(e.key);
+        items.push({ effect: e, status: 'executed', result: outcome });
+      } else {
+        (logger?.error || console.error)(`Effect execution failed for ${e.key}:`, err(outcome));
+        items.push({ effect: e, status: 'failed', error: err(outcome), result: outcome });
+      }
+    });
+  };
 
   switch (exec.strategy) {
-    case 'parallel': {
-      if (!maxConcurrency || maxConcurrency >= pending.length) {
-        try {
-          await Promise.all(pending.map(effectExecutor));
-          pending.forEach(e => { seen.add(e.key); pushExecuted(e); });
-        } catch (error) {
-          (logger?.error || console.error)('Some effects failed during parallel execution:', error);
-          // none marked
-        }
-      } else {
-        let failed = false;
-        for (let i = 0; i < pending.length; i += maxConcurrency) {
-          const batch = pending.slice(i, i + maxConcurrency);
-          try {
-            await Promise.all(batch.map(effectExecutor));
-          } catch (error) {
-            (logger?.error || console.error)('Some effects failed during parallel (batched) execution:', error);
-            failed = true;
-            break;
-          }
-        }
-        if (!failed) {
-          pending.forEach(e => { seen.add(e.key); pushExecuted(e); });
-        }
-      }
-      break;
-    }
+    case 'parallel':
     case 'allSettled': {
       if (!maxConcurrency || maxConcurrency >= pending.length) {
-        const results = await Promise.allSettled(pending.map(effectExecutor));
-        results.forEach((r, i) => {
-          const e = pending[i]!;
-          if (r.status === 'fulfilled') {
-            seen.add(e.key); pushExecuted(e);
-          } else {
-            (logger?.error || console.error)(`Effect execution failed for ${e.key}:`, r.reason);
-            pushFailed(e, r.reason);
-          }
-        });
+        await record_batch(pending);
       } else {
         for (let i = 0; i < pending.length; i += maxConcurrency) {
-          const batch = pending.slice(i, i + maxConcurrency);
-          const results = await Promise.allSettled(batch.map(effectExecutor));
-          results.forEach((r, j) => {
-            const e = batch[j]!;
-            if (r.status === 'fulfilled') {
-              seen.add(e.key); pushExecuted(e);
-            } else {
-              (logger?.error || console.error)(`Effect execution failed for ${e.key}:`, r.reason);
-              pushFailed(e, r.reason);
-            }
-          });
+          await record_batch(pending.slice(i, i + maxConcurrency));
         }
       }
       break;
@@ -415,7 +379,7 @@ export async function orchestrate_with_report<S, A, E>(
     items,
   };
 
-  return { state: next, report };
+  return done({ state: next, report });
 }
 
 /**

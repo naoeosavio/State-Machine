@@ -98,6 +98,31 @@ const state = compute(mach, game, 2000);
 
 This system is particularly useful for multiplayer games where precise synchronization and the ability to replay previous states are crucial.
 
+### Errors as Values (lite-fp)
+
+Fallible operations return explicit `Result` values (via [lite-fp](https://www.npmjs.com/package/lite-fp)) — no hidden
+promise rejections, no try-catch sprawl. Failure modes are typed strings you can switch on:
+
+```typescript
+import { isDone, isFail, err, val } from 'lite-fp';
+
+const mach = new_mach(game, 60, 1000, { mode: 'ledger' });
+const result = run(mach, game, lateAction);
+
+if (isFail(result)) {
+  switch (err(result)) {
+    case 'ACTION_IN_PAST':      /* alert / reconcile */ break;
+    case 'COMPUTE_BEHIND_HEAD': /* resync */           break;
+  }
+} else {
+  const state = val(result);
+}
+```
+
+- Core: `register_action` → `Result<void, MachError>`, `run` → `Result<S, MachError>`, `try_compute` never clamps silently.
+- Layer2: `replay_from_snapshot` → `Result<S, Layer2Error>`, `acquire_lock` → `Result<LockToken, 'LOCK_HELD'>`, `get_snapshot_at_tick` → `Option<Snapshot>`.
+- Orchestrator: every effect outcome is captured; `ExecutionReport.items[].result` carries `Done | Fail`, and only fulfilled effects enter the idempotency cache.
+
 ### Side Effects (Orchestrator)
 
 Side effects stay out of the pure core. A generator derives effects from the `(prev, next, action)`

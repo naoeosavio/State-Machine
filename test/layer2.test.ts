@@ -1,3 +1,4 @@
+import { isDone, isFail, err, val } from 'lite-fp';
 import { describe, it, assert, run_all_tests } from './test_utils';
 import * as Mach from '../src/main';
 import { create_layer2 } from '../src/layer2';
@@ -120,9 +121,9 @@ describe('Layer2 System', () => {
     const middle_snapshot = snapshots[Math.floor(snapshots.length / 2)];
     const target_tick = middle_snapshot.tick + 5;
     
-    const replayed_state = layer2.replay_from_snapshot(middle_snapshot.snapshot_id, target_tick);
-    assert.ok(replayed_state !== null);
-    assert.equal((replayed_state as any).counter, target_tick);
+    const replay_outcome = layer2.replay_from_snapshot(middle_snapshot.snapshot_id, target_tick);
+    if (!isDone(replay_outcome)) throw new Error('replay should succeed');
+    assert.equal(val(replay_outcome).counter, target_tick);
   });
   
   it('should maintain chain integrity', () => {
@@ -182,19 +183,20 @@ describe('Layer2 System', () => {
     const layer2 = create_layer2(mach, test_game);
     
     const lock1 = layer2.acquire_lock('resource-1', 'owner-1', 'pessimistic', 5000);
-    assert.ok(lock1 !== null);
+    if (!isDone(lock1)) throw new Error('first lock should be acquired');
     
     const lock2 = layer2.acquire_lock('resource-1', 'owner-2', 'pessimistic');
-    assert.equal(lock2, null);
+    if (!isFail(lock2)) throw new Error('second lock should fail');
+    assert.equal(err(lock2), 'LOCK_HELD');
     
-    const verified = layer2.verify_lock('resource-1', lock1!);
+    const verified = layer2.verify_lock('resource-1', val(lock1));
     assert.ok(verified === true);
     
-    const released = layer2.release_lock('resource-1', lock1!);
+    const released = layer2.release_lock('resource-1', val(lock1));
     assert.ok(released === true);
     
     const lock3 = layer2.acquire_lock('resource-1', 'owner-3', 'pessimistic');
-    assert.ok(lock3 !== null);
+    assert.ok(isDone(lock3), 'lock should be acquirable after release');
   });
   
   it('should handle optimistic locking with expiration', async () => {
@@ -202,15 +204,15 @@ describe('Layer2 System', () => {
     const layer2 = create_layer2(mach, test_game);
     
     const lock = layer2.acquire_lock('resource-2', 'owner-1', 'optimistic', 100);
-    assert.ok(lock !== null);
+    if (!isDone(lock)) throw new Error('lock should be acquired');
     
     await new Promise(resolve => setTimeout(resolve, 150));
     
-    const verified = layer2.verify_lock('resource-2', lock!);
-    assert.ok(verified === false);
+    const verified = layer2.verify_lock('resource-2', val(lock));
+    assert.ok(verified === false, "expired lock must not verify");
     
     const new_lock = layer2.acquire_lock('resource-2', 'owner-2', 'optimistic');
-    assert.ok(new_lock !== null);
+    assert.ok(isDone(new_lock), "expired lock frees the resource");
   });
   
   it('should export and verify complete log', () => {

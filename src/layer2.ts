@@ -1,12 +1,23 @@
 import * as Mach from './main';
 import { sha256_hex, sha512_hex } from './hash';
 import { system_clock, json_serializer, type Clock, type Hasher, type Serializer } from './adapters';
+import { done, fail, isFail, some, none, type Result, type Option } from 'lite-fp';
 
 export type Hash = string;
 export type ActionId = string;
 export type SchemaVersion = number;
 export type SnapshotId = string;
 export type LockToken = string;
+
+/**
+ * Explicit failure modes of the Layer2 surface.
+ * CHAIN_BROKEN is reserved for the upcoming persistence reload path.
+ */
+export type Layer2Error =
+  | 'SNAPSHOT_NOT_FOUND'
+  | 'TARGET_BEFORE_SNAPSHOT'
+  | 'LOCK_HELD'
+  | 'CHAIN_BROKEN';
 
 export interface Layer2Config<S, A> {
   mach: Mach.Mach<S, A>;
@@ -142,16 +153,24 @@ export class Layer2<S, A> {
     return hash.toString(16).padStart(64, '0');
   }
 
-  public register_action_with_id(action: Mach.Action<A>, action_id: ActionId): void {
+  /**
+   * Register an idempotent action and append it to the hash chain.
+   * Forwards the core's failure untouched (e.g. ACTION_IN_PAST on ledger
+   * machines) — nothing is computed, logged or snapshotted on failure.
+   */
+  public register_action_with_id(action: Mach.Action<A>, action_id: ActionId): Result<void, Mach.MachError | Layer2Error> {
     if (this.action_id_map.has(action_id)) {
-      return;
+      return done(undefined);
+    }
+
+    const registered = Mach.register_action(this.config.mach, action);
+    if (isFail(registered)) {
+      return registered;
     }
 
     const now = this.clock.now_ms();
     const tick = Mach.time_to_tick(this.config.mach, action.time);
     const current_state = Mach.get_latest_state(this.config.mach);
-
-    Mach.register_action(this.config.mach, action);
     const new_state = Mach.compute(this.config.mach, this.config.game, action.time);
 
     // Hash inputs are fully deterministic: same prior chain + same action
@@ -184,6 +203,7 @@ export class Layer2<S, A> {
     this.last_hash = entry_hash;
 
     this.maybe_create_snapshot(tick);
+    return done(undefined);
   }
 
   private maybe_create_snapshot(current_tick: Mach.Tick): void {
@@ -229,22 +249,27 @@ export class Layer2<S, A> {
     this.snapshots.push(snapshot);
   }
 
-  public get_snapshot_at_tick(tick: Mach.Tick): Snapshot<S> | null {
+  /** Closest snapshot at or before `tick`, as an explicit Option. */
+  public get_snapshot_at_tick(tick: Mach.Tick): Option<Snapshot<S>> {
     let closest: Snapshot<S> | null = null;
-    
+
     for (const snapshot of this.snapshots) {
       if (snapshot.tick <= tick && (!closest || snapshot.tick > closest.tick)) {
         closest = snapshot;
       }
     }
-    
-    return closest;
+
+    return closest ? some(closest) : none();
   }
 
-  public replay_from_snapshot(snapshot_id: SnapshotId, target_tick: Mach.Tick): S | null {
+  /**
+   * Deterministically rebuild state at `target_tick` by re-applying logged
+   * actions on top of the snapshot through the core machine.
+   */
+  public replay_from_snapshot(snapshot_id: SnapshotId, target_tick: Mach.Tick): Result<S, Layer2Error> {
     const snapshot = this.snapshots.find(s => s.snapshot_id === snapshot_id);
-    if (!snapshot) return null;
-    if (target_tick < snapshot.tick) return null;
+    if (!snapshot) return fail('SNAPSHOT_NOT_FOUND');
+    if (target_tick < snapshot.tick) return fail('TARGET_BEFORE_SNAPSHOT');
 
     const mach = this.config.mach;
 
@@ -270,7 +295,7 @@ export class Layer2<S, A> {
       }
     }
 
-    return Mach.compute(seed, this.config.game, Mach.tick_to_time(target_tick, mach.ticks_per_second));
+    return done(Mach.compute(seed, this.config.game, Mach.tick_to_time(target_tick, mach.ticks_per_second)));
   }
 
   public add_schema_migration(migration: SchemaMigration): void {
@@ -292,7 +317,7 @@ export class Layer2<S, A> {
     return data;
   }
 
-  public acquire_lock(resource_id: string, owner: string, type: 'pessimistic' | 'optimistic', ttl_ms?: number): LockToken | null {
+  public acquire_lock(resource_id: string, owner: string, type: 'pessimistic' | 'optimistic', ttl_ms?: number): Result<LockToken, 'LOCK_HELD'> {
     const now = this.clock.now_ms();
     const existing_lock = this.locks.get(resource_id);
 
@@ -300,7 +325,7 @@ export class Layer2<S, A> {
       if (existing_lock.expires_at && now > existing_lock.expires_at) {
         this.locks.delete(resource_id);
       } else {
-        return null;
+        return fail('LOCK_HELD');
       }
     }
 
@@ -315,7 +340,7 @@ export class Layer2<S, A> {
     };
 
     this.locks.set(resource_id, lock);
-    return token;
+    return done(token);
   }
 
   public release_lock(resource_id: string, token: LockToken): boolean {

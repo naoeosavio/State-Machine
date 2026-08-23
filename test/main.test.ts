@@ -77,8 +77,11 @@ describe("State Machine Core", () => {
 
   it("should run an action and compute the state", () => {
     const mach = Mach.new_mach<State, Action>(game, 60, 1000);
-    const state = Mach.run(mach, game, { type: "inc", time: 500 });
-    assert.equal(state.count, 1, "State should be 1 after run");
+    const result = Mach.run(mach, game, { type: "inc", time: 500 });
+    assert.ok(isDone(result), "run should succeed for a fresh machine");
+    if (isDone(result)) {
+      assert.equal(val(result).count, 1, "State should be 1 after run");
+    }
     const currentState = Mach.compute(mach, game, 500);
     assert.equal(currentState?.count, 1, "compute should return the computed state");
   });

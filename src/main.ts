@@ -1,4 +1,4 @@
-import { done, fail, type Result } from 'lite-fp';
+import { done, fail, isFail, type Result } from 'lite-fp';
 import type { Serializer } from './adapters';
 
 export type Time = number; // 48-bit
@@ -190,11 +190,16 @@ export function try_compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time
   return done(compute(mach, game, time));
 }
 
-export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: Action<A>): S {
-  // Register the action in the machine
-  register_action(mach, action);
-  // Compute and return the new state up to the action's time
-  return compute(mach, game, action.time)
+/**
+ * Register an action and compute up to its time in one step.
+ * Ledger mode: fails with ACTION_IN_PAST for late actions (nothing applied).
+ */
+export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: Action<A>): Result<S, MachError> {
+  const registered = register_action(mach, action);
+  if (isFail(registered)) {
+    return registered;
+  }
+  return try_compute(mach, game, action.time);
 }
 
 export function commit<S, A>(mach: Mach<S, A>, time: Time) {

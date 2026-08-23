@@ -1,6 +1,6 @@
 {
   "name": "@uwu-games/uwu-state-machine",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "Game tick system",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

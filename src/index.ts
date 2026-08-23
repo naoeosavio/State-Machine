@@ -52,9 +52,13 @@ export {
   Snapshot,
   SchemaMigration,
   Lock,
+  Layer2Error,
   Layer2,
   create_layer2,
 } from './layer2';
+// Explicit error handling (lite-fp re-exports)
+export { done, fail, isDone, isFail, val, err, some, none, isSome, isNone } from 'lite-fp';
+export type { Result, Option } from 'lite-fp';
 // Pluggable seams
 export {
   Clock,

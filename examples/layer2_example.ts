@@ -1,5 +1,6 @@
 import { new_mach, Game, Action } from '../src/main';
 import { create_layer2 } from '../src/layer2';
+import { isDone, isFail, err, val, isNone, isSome, unwrap } from 'lite-fp';
 
 type BankState = {
   balances: Record<string, bigint>;
@@ -112,14 +113,18 @@ const migrated = layer2.migrate_data(test_data, 2);
 console.log(`   Migration successful: ${migrated.metadata?.migrated_from_v1 === true}`);
 
 console.log('\n5. Testing locking mechanisms...');
-const lock_token = layer2.acquire_lock('account-alice', 'service-1', 'pessimistic', 5000);
-console.log(`   Acquired lock: ${lock_token ? '✓' : '✗'}`);
+const lock_result = layer2.acquire_lock('account-alice', 'service-1', 'pessimistic', 5000);
+console.log(`   Acquired lock: ${isDone(lock_result) ? '✓' : '✗ (' + err(lock_result) + ')'}`);
 
-if (lock_token) {
-  const verified = layer2.verify_lock('account-alice', lock_token);
+if (isDone(lock_result)) {
+  // While still held, a second acquire fails explicitly:
+  const denied = layer2.acquire_lock('account-alice', 'service-2', 'pessimistic');
+  console.log(`   Second lock rejected as Err: ${isFail(denied) && err(denied) === 'LOCK_HELD' ? '✓' : '✗'}`);
+
+  const verified = layer2.verify_lock('account-alice', val(lock_result));
   console.log(`   Lock verified: ${verified ? '✓' : '✗'}`);
-  
-  const released = layer2.release_lock('account-alice', lock_token);
+
+  const released = layer2.release_lock('account-alice', val(lock_result));
   console.log(`   Lock released: ${released ? '✓' : '✗'}`);
 }
 
@@ -128,8 +133,14 @@ const snapshots = layer2.export_snapshots();
 if (snapshots.length > 1) {
   const snapshot = snapshots[1];
   const replayed = layer2.replay_from_snapshot(snapshot.snapshot_id, snapshot.tick + 2);
-  console.log(`   Replayed state exists: ${replayed ? '✓' : '✗'}`);
+  console.log(`   Replayed state exists: ${isDone(replayed) ? '✓' : '✗'}`);
 }
+
+console.log('\n7. Snapshot lookup returns Option...');
+const missing = layer2.get_snapshot_at_tick(-1);
+console.log(`   No snapshot before genesis -> None: ${isNone(missing) ? '✓' : '✗'}`);
+const found = layer2.get_snapshot_at_tick(1000);
+console.log(`   Snapshot found -> Some: ${isSome(found) ? '✓ (tick ' + unwrap(found).tick + ')' : '✗'}`);
 
 console.log('\n=== Example Complete ===');
 console.log('\nLayer 2 Features Implemented:');

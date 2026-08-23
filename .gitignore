@@ -1,2 +1,23 @@
-node_modules
-dist
+# Ignore everything by default
+*
+
+# Re-include distribution output and metadata
+!examples/*
+!examples/**/*
+!examples/
+!docs/examples/*
+!docs/**/*
+!docs/*
+!docs/
+!src/**/*
+!src/*
+!src/
+!test/*
+!test/
+!package.json
+!README*
+!LICENSE*
+!.gitignore
+!tsconfig*
+!CHANGELOG*
+!AGENTS.md

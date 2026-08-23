@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "clean": "rimraf dist",
+    "lint": "tsc --noEmit",
     "build": "npm run clean && tsc --declaration",
     "test": "npm run test:main && npm run test:orchestrator && npm run test:layer2",
     "test:main": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/main.test.ts",
@@ -40,5 +41,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "lite-fp": "0.8.0"
   }
 }

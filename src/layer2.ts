@@ -238,6 +238,7 @@ export class Layer2<S, A> {
 
     // Seed a fresh machine from the snapshot state.
     const seed: Mach.Mach<S, A> = {
+      mode: mach.mode,
       ticks_per_second: mach.ticks_per_second,
       max_tick_travel: Number.MAX_SAFE_INTEGER,
       genesis_tick: snapshot.tick,

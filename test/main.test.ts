@@ -1,4 +1,5 @@
 import * as Mach from '../src/main';
+import { done, fail, isDone, isFail, err, val } from 'lite-fp';
 import { assert, describe, it, run_all_tests } from './test_utils';
 
 // Test Suite
@@ -146,6 +147,112 @@ describe("State Machine Core", () => {
     const post1 = Mach.compute(mach2, game2, t);
     assert.equal(pre1.n, 1, `pre-tick should remain 1, got ${pre1.n}`);
     assert.equal(post1.n, 6, `post-tick should be 6 (1 + 5), got ${post1.n}`);
+  });
+
+});
+
+describe("Dual Mode (rollback x ledger)", () => {
+
+  it("defaults to rollback mode", () => {
+    const mach = Mach.new_mach<State, Action>(game, 60, 1000);
+    assert.equal(mach.mode, 'rollback', "default mode should be rollback");
+  });
+
+  it("stores an explicit ledger mode", () => {
+    const mach = Mach.new_mach<State, Action>(game, 60, 1000, { mode: 'ledger' });
+    assert.equal(mach.mode, 'ledger', "mode should be ledger");
+  });
+
+  it("rollback mode recomputes on late actions (netcode)", () => {
+    const mach = Mach.new_mach<State, Action>(game, 60, 10000);
+    Mach.run(mach, game, { type: "inc", time: 600 });
+    assert.equal(Mach.get_latest_state(mach).count, 1, "count should be 1");
+
+    const result = Mach.register_action(mach, { type: "inc", time: 500 }); // late
+    assert.ok(isDone(result), "late action must be accepted in rollback mode");
+
+    const state = Mach.compute(mach, game, 600);
+    assert.equal(state.count, 2, "late action should be replayed into the state");
+  });
+
+  it("ledger mode rejects late actions without touching history", () => {
+    const mach = Mach.new_mach<State, Action>(game, 60, 10000, { mode: 'ledger' });
+    Mach.register_action(mach, { type: "inc", time: 500 });
+    Mach.register_action(mach, { type: "inc", time: 600 });
+    Mach.compute(mach, game, 600);
+    const tick_500 = Mach.time_to_tick(mach, 500);
+
+    const result = Mach.register_action(mach, { type: "inc", time: 300 }); // late
+    assert.ok(isFail(result), "late action must be rejected in ledger mode");
+    if (isFail(result)) {
+      assert.equal(err(result), 'ACTION_IN_PAST', "error should be ACTION_IN_PAST");
+    }
+
+    assert.ok(Mach.get_state_at_tick(mach, tick_500) !== undefined,
+      "cached history must remain untouched after rejection");
+
+    const again = Mach.compute(mach, game, 600);
+    assert.equal(again.count, 2, "rejected action must not affect the state");
+  });
+
+  it("both modes agree on punctual action sequences", () => {
+    const actions: Action[] = [
+      { type: "inc", time: 500 },
+      { type: "dec", time: 700 },
+      { type: "inc", time: 900 },
+    ];
+
+    const rb = Mach.new_mach<State, Action>(game, 60, 10000);
+    const ld = Mach.new_mach<State, Action>(game, 60, 10000, { mode: 'ledger' });
+
+    for (const action of actions) {
+      assert.ok(isDone(Mach.register_action(rb, action)));
+      assert.ok(isDone(Mach.register_action(ld, action)));
+      Mach.compute(rb, game, action.time);
+      Mach.compute(ld, game, action.time);
+    }
+
+    const rb_raw: any = JSON.parse(Mach.serialize_machine(rb));
+    const ld_raw: any = JSON.parse(Mach.serialize_machine(ld));
+    delete rb_raw.mode;
+    delete ld_raw.mode;
+    assert.deepEqual(rb_raw, ld_raw,
+      "punctual sequences must produce identical machines (modulo mode)");
+    assert.equal(rb.last_state.count, 1, "rollback net count should be 1");
+    assert.equal(ld.last_state.count, 1, "ledger net count should be 1");
+  });
+
+  it("try_compute errors behind head in ledger; plain compute clamps", () => {
+    const mach = Mach.new_mach<State, Action>(game, 60, 10000, { mode: 'ledger' });
+    Mach.run(mach, game, { type: "inc", time: 600 });
+    assert.equal(Mach.get_latest_state(mach).count, 1, "head count should be 1");
+
+    const result = Mach.try_compute(mach, game, 300);
+    assert.ok(isFail(result), "traveling behind head must fail in ledger mode");
+    if (isFail(result)) {
+      assert.equal(err(result), 'COMPUTE_BEHIND_HEAD', "error should be COMPUTE_BEHIND_HEAD");
+    }
+
+    const clamped = Mach.compute(mach, game, 300);
+    assert.equal(clamped.count, 1, "plain compute clamps to head state");
+
+    const ok_result = Mach.try_compute(mach, game, 700);
+    assert.ok(isDone(ok_result), "forward compute succeeds");
+    if (isDone(ok_result)) {
+      assert.equal(val(ok_result).count, 1, "state unchanged by forward step");
+    }
+  });
+
+  it("deserialization defaults missing mode to rollback", () => {
+    const mach = Mach.new_mach<State, Action>(game, 60, 1000);
+    Mach.run(mach, game, { type: "inc", time: 500 });
+
+    const raw = JSON.parse(Mach.serialize_machine(mach));
+    delete raw.mode;
+    const restored = Mach.deserialize_machine<State, Action>(JSON.stringify(raw));
+
+    assert.equal(restored.mode, 'rollback', "missing mode should default to rollback");
+    assert.equal(Mach.compute(restored, game, 500).count, 1, "state preserved");
   });
 
 });

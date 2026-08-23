@@ -1,3 +1,5 @@
+import { done, fail, type Result } from 'lite-fp';
+
 export type Time = number; // 48-bit
 export type Tick = number; // 48-bit
 
@@ -5,7 +7,17 @@ export type Action<A> = A & { time: Time };
 export type StateLogs<S> = Record<Tick, S>;
 export type ActionLogs<A> = Record<Tick, Action<A>[]>;
 
+/**
+ * 'rollback': late actions delete future cached states and recompute (games/netcode).
+ * 'ledger':   history is immutable; late actions are rejected with ACTION_IN_PAST
+ *             (trading bots, financial records).
+ */
+export type MachMode = 'rollback' | 'ledger';
+
+export type MachError = 'ACTION_IN_PAST' | 'COMPUTE_BEHIND_HEAD';
+
 export type Mach<S, A> = {
+  mode: MachMode,
   ticks_per_second: number,
   max_tick_travel: Tick,
   genesis_tick: Tick,
@@ -25,6 +37,7 @@ export function new_mach<S, A>(
   game: Game<S, A>,
   ticks_per_second: number,
   max_ms_travel: number,
+  opts?: { mode?: MachMode },
 ): Mach<S, A> {
   if (ticks_per_second <= 0) {
     throw new Error("ticks_per_second must be a positive number.");
@@ -34,6 +47,7 @@ export function new_mach<S, A>(
   }
 
   const mach: Mach<S, A> = {
+    mode: opts?.mode ?? 'rollback',
     ticks_per_second,
     max_tick_travel: 0, // Temporary value
     genesis_tick: Number.MAX_SAFE_INTEGER,
@@ -79,10 +93,16 @@ export function stable_stringify(value: any): string {
   );
 }
 
-export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>) {
+export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>): Result<void, MachError> {
   var time = action.time;
   var tick = time_to_tick(mach, time);
   var hash = stable_stringify(action);
+
+  // Ledger mode: never rewrite published history.
+  // Guard runs before any mutation so a rejected action has zero side effects.
+  if (mach.mode === 'ledger' && tick < mach.cached_tick) {
+    return fail('ACTION_IN_PAST');
+  }
 
   // Initilize this tick's actions
   if (!mach.action_logs[tick]) {
@@ -98,23 +118,34 @@ export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>) {
   // If the message is duplicated, skip it
   for (let action of actions) {
     if (stable_stringify(action) == hash) {
-      return;
+      return done(undefined);
     }
   }
 
-  // Deletes all >tick states
-  for (let t = tick + 1; t <= mach.cached_tick; ++t) {
-    delete mach.state_logs[t];
+  // Rollback mode: deletes all >tick states so compute rebuilds them.
+  // Ledger mode keeps every cached state untouched.
+  if (mach.mode === 'rollback') {
+    for (let t = tick + 1; t <= mach.cached_tick; ++t) {
+      delete mach.state_logs[t];
+    }
+    mach.cached_tick = Math.min(mach.cached_tick, tick);
   }
-  mach.cached_tick = Math.min(mach.cached_tick, tick);
 
   // Pushes the action
   insertOrdered(actions, action);
+  return done(undefined);
 }
 
 export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S {
-  var ini_t = mach.cached_tick;
   var end_t = time_to_tick(mach, time);
+
+  // Ledger mode never travels backwards; plain compute clamps to the head.
+  // Use try_compute to get an explicit COMPUTE_BEHIND_HEAD error instead.
+  if (mach.mode === 'ledger' && end_t < mach.cached_tick) {
+    end_t = mach.cached_tick;
+  }
+
+  var ini_t = mach.cached_tick;
   var state = mach.state_logs[ini_t];
 
   if (!state) {
@@ -146,6 +177,18 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
   return state;
 }
 
+/**
+ * Like compute, but ledger mode returns an explicit Err instead of clamping
+ * when asked to travel behind the head tick.
+ */
+export function try_compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): Result<S, MachError> {
+  const end_t = time_to_tick(mach, time);
+  if (mach.mode === 'ledger' && end_t < mach.cached_tick) {
+    return fail('COMPUTE_BEHIND_HEAD');
+  }
+  return done(compute(mach, game, time));
+}
+
 export function run<S, A>(mach: Mach<S, A>, game: Game<S, A>, action: Action<A>): S {
   // Register the action in the machine
   register_action(mach, action);
@@ -169,7 +212,9 @@ export function serialize_machine<S, A>(mach: Mach<S, A>): string {
 }
 
 export function deserialize_machine<S, A>(json_string: string): Mach<S, A> {
-  return JSON.parse(json_string);
+  const raw = JSON.parse(json_string);
+  // Machines saved before modes existed have no `mode`; default to rollback.
+  return { mode: 'rollback', ...raw };
 }
 
 export function reset_machine<S, A>(mach: Mach<S, A>, game: Game<S, A>) {

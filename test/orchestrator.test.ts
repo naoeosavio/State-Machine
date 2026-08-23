@@ -55,7 +55,7 @@ describe('Orchestrator.dispatch', () => {
 
   it('should process an action and execute the resulting side effect', async () => {
     const mach = Mach.new_mach<State, Action>(game,60, 1000);
-    const seen = new Set<string>();
+    const seen = Orchestrator.new_memory_store();
     const executedEffects: Orchestrator.SideEffect<MyEffect>[] = [];
 
     const executor: Orchestrator.SideEffectExecutor<MyEffect> = async (effect) => {
@@ -79,7 +79,7 @@ describe('Orchestrator.dispatch', () => {
 
   it('should not execute a side effect if its key is already cached', async () => {
     const mach = Mach.new_mach<State, Action>(game,60, 1000);
-    const seen = new Set<string>();
+    const seen = Orchestrator.new_memory_store();
     const executedEffects: Orchestrator.SideEffect<MyEffect>[] = [];
     const executor: Orchestrator.SideEffectExecutor<MyEffect> = async (effect) => {
       executedEffects.push(effect);
@@ -100,7 +100,7 @@ describe('Orchestrator.dispatch', () => {
 
   it('should process a sequence of actions and generate corresponding effects', async () => {
     const mach = Mach.new_mach<State, Action>(game,60, 1000);
-    const seen = new Set<string>();
+    const seen = Orchestrator.new_memory_store();
     const executedEffects: Orchestrator.SideEffect<MyEffect>[] = [];
     const executor: Orchestrator.SideEffectExecutor<MyEffect> = async (effect) => {
       executedEffects.push(effect);
@@ -139,7 +139,7 @@ describe('Orchestrator.dispatch', () => {
     };
 
     const mach = Mach.new_mach<TState, TAction>(game2,60, 1000);
-    const seen = new Set<string>();
+    const seen = Orchestrator.new_memory_store();
     const seenOldNew: Array<{ old: number; next: number }> = [];
 
     const generator2: Orchestrator.SideEffectGenerator<TState, TAction, { delta: number }> = (oldState, newState, action) => {
@@ -192,7 +192,7 @@ describe('Orchestrator.dispatch', () => {
     };
 
     const mach = Mach.new_mach<S, A>(game2,60, 1000);
-    const seen = new Set<string>();
+    const seen = Orchestrator.new_memory_store();
     const cfg: Orchestrator.SideEffectConfig<S, A, E> = { mach, game: game2, generator: gen, executor: exec, seen };
 
     await Orchestrator.orchestrate(cfg, { type: 'BUMP', time: 1 }, { strategy: 'parallel' });
@@ -217,7 +217,7 @@ describe('Orchestrator.dispatch', () => {
       if (e.key.startsWith('fail-')) throw new Error('boom');
     };
     const mach = Mach.new_mach<S, A>(game2,60, 1000);
-    const seen = new Set<string>();
+    const seen = Orchestrator.new_memory_store();
     const cfg: Orchestrator.SideEffectConfig<S, A, E> = { mach, game: game2, generator: gen, executor: exec, seen };
 
     await Orchestrator.orchestrate(cfg, { type: 'BUMP', time: 2 }, { strategy: 'allSettled' });
@@ -234,7 +234,8 @@ describe('Orchestrator.dispatch', () => {
       { key: `k1-${a.time}`, t: '1' },
       { key: `k2-${a.time}`, t: '2' },
     ];
-    const seen = new Set<string>([`k1-3`]);
+    const seen = Orchestrator.new_memory_store();
+    seen.add(`k1-3`);
     const exec: Orchestrator.SideEffectExecutor<E> = async (_e) => {};
     const mach = Mach.new_mach<S, A>(game2,60, 1000);
     const { report } = await Orchestrator.dispatch_with_report({ mach, game: game2, generator: gen, executor: exec, seen }, { type: 'X', time: 3 });

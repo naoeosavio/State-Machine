@@ -1,5 +1,6 @@
 import * as Mach from './main';
 import { sha256_hex, sha512_hex } from './hash';
+import { system_clock, json_serializer, type Clock, type Hasher, type Serializer } from './adapters';
 
 export type Hash = string;
 export type ActionId = string;
@@ -11,7 +12,14 @@ export interface Layer2Config<S, A> {
   mach: Mach.Mach<S, A>;
   game: Mach.Game<S, A>;
   snapshot_interval: number;
+  /** Preset algorithms; ignored when a custom `hasher` is provided. */
   hash_algorithm: 'sha256' | 'sha512' | 'custom';
+  /** Custom hash function; takes precedence over `hash_algorithm`. */
+  hasher?: Hasher;
+  /** Time source; defaults to the system clock. Use a simulated clock for reproducible chains. */
+  clock?: Clock;
+  /** Text codec used for hashing inputs; defaults to bigint-safe JSON. */
+  serializer?: Serializer<S, A>;
   schema_version: SchemaVersion;
 }
 
@@ -57,6 +65,9 @@ export interface Lock {
 
 export class Layer2<S, A> {
   private config: Layer2Config<S, A>;
+  private clock: Clock;
+  private hasher: Hasher;
+  private serializer: Serializer<S, A>;
   private immutable_log: ImmutableLogEntry<S, A>[] = [];
   private snapshots: Snapshot<S>[] = [];
   private schema_migrations: SchemaMigration[] = [];
@@ -66,16 +77,32 @@ export class Layer2<S, A> {
 
   constructor(config: Layer2Config<S, A>) {
     this.config = config;
+    this.clock = config.clock ?? system_clock;
+    this.serializer = config.serializer ?? json_serializer<S, A>();
+    this.hasher = config.hasher ?? this.preset_hasher(config.hash_algorithm);
     this.initialize_genesis();
   }
 
+  /** Resolve a preset algorithm to a concrete hash function. */
+  private preset_hasher(algorithm: 'sha256' | 'sha512' | 'custom'): Hasher {
+    switch (algorithm) {
+      case 'sha256':
+        return sha256_hex;
+      case 'sha512':
+        return sha512_hex;
+      case 'custom':
+        return (input) => this.custom_hash(input);
+    }
+  }
+
   private initialize_genesis(): void {
+    const now = this.clock.now_ms();
     const genesis_state = this.config.game.init();
-    const genesis_hash = this.compute_hash('genesis', this.serialize_state(genesis_state));
-    
+    const genesis_hash = this.hasher('genesis|' + this.serializer.stringify_state(genesis_state));
+
     const genesis_snapshot: Snapshot<S> = {
       snapshot_id: 'genesis',
-      timestamp: Date.now(),
+      timestamp: now,
       tick: 0,
       state: genesis_state,
       hash: genesis_hash,
@@ -89,34 +116,15 @@ export class Layer2<S, A> {
   }
 
   private serialize_state(state: S): string {
-    return JSON.stringify(state, (_, value) => {
-      if (typeof value === 'bigint') {
-        return value.toString();
-      }
-      return value;
-    });
+    return this.serializer.stringify_state(state);
   }
 
   private serialize_action(action: Mach.Action<A>): string {
-    return JSON.stringify(action, (_, value) => {
-      if (typeof value === 'bigint') {
-        return value.toString();
-      }
-      return value;
-    });
+    return this.serializer.stringify_action(action);
   }
 
   private compute_hash(...inputs: string[]): Hash {
-    const input = inputs.join('|');
-
-    switch (this.config.hash_algorithm) {
-      case 'sha256':
-        return sha256_hex(input);
-      case 'sha512':
-        return sha512_hex(input);
-      case 'custom':
-        return this.custom_hash(input);
-    }
+    return this.hasher(inputs.join('|'));
   }
 
   private custom_hash(input: string): Hash {
@@ -139,12 +147,15 @@ export class Layer2<S, A> {
       return;
     }
 
+    const now = this.clock.now_ms();
     const tick = Mach.time_to_tick(this.config.mach, action.time);
     const current_state = Mach.get_latest_state(this.config.mach);
-    
+
     Mach.register_action(this.config.mach, action);
     const new_state = Mach.compute(this.config.mach, this.config.game, action.time);
-    
+
+    // Hash inputs are fully deterministic: same prior chain + same action
+    // yields the same entry hash, id and timestamps come from the injected clock.
     const entry_hash = this.compute_hash(
       this.last_hash,
       action_id,
@@ -152,12 +163,11 @@ export class Layer2<S, A> {
       this.serialize_state(current_state),
       this.serialize_state(new_state),
       tick.toString(),
-      Date.now().toString()
     );
 
     const log_entry: ImmutableLogEntry<S, A> = {
-      entry_id: `entry_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: Date.now(),
+      entry_id: `entry_${entry_hash.slice(0, 16)}`,
+      timestamp: now,
       tick,
       action,
       state_before: current_state,
@@ -187,10 +197,11 @@ export class Layer2<S, A> {
   }
 
   private create_snapshot(tick: Mach.Tick): void {
+    const now = this.clock.now_ms();
     const time = Mach.tick_to_time(tick, this.config.mach.ticks_per_second);
     const state = Mach.get_state_at_tick(this.config.mach, tick)
       ?? Mach.compute(this.config.mach, this.config.game, time);
-    
+
     const last_snapshot = this.snapshots[this.snapshots.length - 1];
     const log_entries_since = this.immutable_log
       .filter(entry => entry.tick > (last_snapshot?.tick || 0) && entry.tick <= tick)
@@ -203,9 +214,10 @@ export class Layer2<S, A> {
       log_entries_since.join(',')
     );
 
+    // Id is content-addressed: same chain + state => same snapshot id.
     const snapshot: Snapshot<S> = {
-      snapshot_id: `snapshot_${tick}_${Date.now()}`,
-      timestamp: Date.now(),
+      snapshot_id: `snapshot_${tick}_${snapshot_hash.slice(0, 16)}`,
+      timestamp: now,
       tick,
       state,
       hash: snapshot_hash,
@@ -281,22 +293,23 @@ export class Layer2<S, A> {
   }
 
   public acquire_lock(resource_id: string, owner: string, type: 'pessimistic' | 'optimistic', ttl_ms?: number): LockToken | null {
+    const now = this.clock.now_ms();
     const existing_lock = this.locks.get(resource_id);
-    
+
     if (existing_lock) {
-      if (existing_lock.expires_at && Date.now() > existing_lock.expires_at) {
+      if (existing_lock.expires_at && now > existing_lock.expires_at) {
         this.locks.delete(resource_id);
       } else {
         return null;
       }
     }
 
-    const token = `lock_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const token = `lock_${now}_${Math.random().toString(36).substr(2, 9)}`;
     const lock: Lock = {
       token,
       resource_id,
-      acquired_at: Date.now(),
-      expires_at: ttl_ms ? Date.now() + ttl_ms : null,
+      acquired_at: now,
+      expires_at: ttl_ms ? now + ttl_ms : null,
       owner,
       type,
     };
@@ -308,7 +321,7 @@ export class Layer2<S, A> {
   public release_lock(resource_id: string, token: LockToken): boolean {
     const lock = this.locks.get(resource_id);
     if (!lock || lock.token !== token) return false;
-    
+
     this.locks.delete(resource_id);
     return true;
   }
@@ -316,12 +329,12 @@ export class Layer2<S, A> {
   public verify_lock(resource_id: string, token: LockToken): boolean {
     const lock = this.locks.get(resource_id);
     if (!lock || lock.token !== token) return false;
-    
-    if (lock.expires_at && Date.now() > lock.expires_at) {
+
+    if (lock.expires_at && this.clock.now_ms() > lock.expires_at) {
       this.locks.delete(resource_id);
       return false;
     }
-    
+
     return true;
   }
 
@@ -390,6 +403,9 @@ export function create_layer2<S, A>(
     game,
     snapshot_interval: options?.snapshot_interval || 1000,
     hash_algorithm: options?.hash_algorithm || 'sha256',
+    hasher: options?.hasher,
+    clock: options?.clock,
+    serializer: options?.serializer,
     schema_version: options?.schema_version || 1,
   };
 

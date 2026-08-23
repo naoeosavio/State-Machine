@@ -76,8 +76,8 @@ export type SideEffectConfig<S, A, E> = {
   generator: SideEffectGenerator<S,A, E>;
   /** The function that executes the side effects. */
   executor: SideEffectExecutor<E>;
-  /** Idempotency cache used to dedupe effect keys. */
-  seen: Set<string>;
+  /** Idempotency cache used to dedupe effect keys. Swap in a durable EffectStore for restart-safe delivery. */
+  seen: EffectStore;
   /** Optional logger implementation. */
   logger?: Logger;
 };
@@ -430,7 +430,7 @@ export function create_orchestrator<S, A, E>(config: SideEffectConfig<S, A, E>) 
     dispatch_with_report: (action: Mach.Action<A>) => dispatch_with_report(config, action),
     orchestrate_with_report: (action: Mach.Action<A>, exec: EffectExecOptions<E>) => orchestrate_with_report(config, action, exec),
     preload_seen: (keys: string[]) => { keys.forEach(k => config.seen.add(k)); },
-    clear_seen: () => { config.seen.clear(); },
-    get_seen_size: () => config.seen.size,
+    clear_seen: () => { config.seen.clear?.(); },
+    get_seen_size: () => config.seen.size?.() ?? 0,
   };
 }

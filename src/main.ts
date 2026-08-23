@@ -1,4 +1,5 @@
 import { done, fail, type Result } from 'lite-fp';
+import type { Serializer } from './adapters';
 
 export type Time = number; // 48-bit
 export type Tick = number; // 48-bit
@@ -207,14 +208,77 @@ export function commit<S, A>(mach: Mach<S, A>, time: Time) {
   mach.genesis_tick = Math.max(mach.genesis_tick, commit_tick);
 }
 
-export function serialize_machine<S, A>(mach: Mach<S, A>): string {
-  return JSON.stringify(mach);
+/**
+ * Serialize a machine. Without a serializer, emits plain (bigint-safe) JSON —
+ * the historical format. With one, states/actions are encoded by it inside an
+ * enveloped document (`__sm_format__: 1`), unlocking BigInt/Map/Set states.
+ */
+export function serialize_machine<S, A>(
+  mach: Mach<S, A>,
+  serializer?: Serializer<S, A>,
+): string {
+  if (!serializer) {
+    return stable_stringify(mach);
+  }
+
+  const state_logs: Record<Tick, string> = {};
+  for (const tick of Object.keys(mach.state_logs)) {
+    const t = Number(tick);
+    state_logs[t] = serializer.stringify_state(mach.state_logs[t]!);
+  }
+  const action_logs: Record<Tick, string[]> = {};
+  for (const tick of Object.keys(mach.action_logs)) {
+    const t = Number(tick);
+    action_logs[t] = mach.action_logs[t]!.map(serializer.stringify_action);
+  }
+
+  return JSON.stringify({
+    __sm_format__: 1,
+    mode: mach.mode,
+    ticks_per_second: mach.ticks_per_second,
+    max_tick_travel: mach.max_tick_travel,
+    genesis_tick: mach.genesis_tick,
+    cached_tick: mach.cached_tick,
+    state_logs,
+    action_logs,
+    last_state: serializer.stringify_state(mach.last_state),
+  });
 }
 
-export function deserialize_machine<S, A>(json_string: string): Mach<S, A> {
+export function deserialize_machine<S, A>(
+  json_string: string,
+  serializer?: Serializer<S, A>,
+): Mach<S, A> {
   const raw = JSON.parse(json_string);
+
   // Machines saved before modes existed have no `mode`; default to rollback.
-  return { mode: 'rollback', ...raw };
+  if (!raw.__sm_format__) {
+    return { mode: 'rollback', ...raw };
+  }
+
+  if (!serializer) {
+    throw new Error("Enveloped machine requires a serializer to decode states.");
+  }
+
+  const state_logs: Record<Tick, S> = {};
+  for (const tick of Object.keys(raw.state_logs)) {
+    state_logs[Number(tick)] = serializer.parse_state(raw.state_logs[tick]);
+  }
+  const action_logs: Record<Tick, Action<A>[]> = {};
+  for (const tick of Object.keys(raw.action_logs)) {
+    action_logs[Number(tick)] = raw.action_logs[tick].map(serializer.parse_action);
+  }
+
+  return {
+    mode: raw.mode ?? 'rollback',
+    ticks_per_second: raw.ticks_per_second,
+    max_tick_travel: raw.max_tick_travel,
+    genesis_tick: raw.genesis_tick,
+    cached_tick: raw.cached_tick,
+    state_logs,
+    action_logs,
+    last_state: serializer.parse_state(raw.last_state),
+  };
 }
 
 export function reset_machine<S, A>(mach: Mach<S, A>, game: Game<S, A>) {

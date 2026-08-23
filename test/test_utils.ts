@@ -19,6 +19,11 @@ export const assert = {
       throw new Error(message);
     }
   },
+  notEqual: (actual: any, expected: any, message: string = "Values should differ") => {
+    if (actual === expected) {
+      throw new Error(message);
+    }
+  },
   ok: (condition: boolean, message: string = "Assertion failed") => {
     if (!condition) {
       throw new Error(message);

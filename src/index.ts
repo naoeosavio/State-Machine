@@ -55,3 +55,14 @@ export {
   Layer2,
   create_layer2,
 } from './layer2';
+// Pluggable seams
+export {
+  Clock,
+  system_clock,
+  simulated_clock,
+  Hasher,
+  Serializer,
+  json_serializer,
+} from './adapters';
+// Durable effect store
+export { new_file_store } from './file_store';

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/`: TypeScript sources. Dual‑mode (`rollback`/`ledger`) core state machine in `main.ts` (typed errors via `lite-fp`), public exports in `index.ts`, side‑effect orchestrator in `orchestrator.ts`, hash‑chained log/snapshots/locks in `layer2.ts`, pure SHA‑256/512 in `hash.ts`.
+- `src/`: TypeScript sources. Dual‑mode (`rollback`/`ledger`) core state machine in `main.ts` (typed errors via `lite-fp`), public exports in `index.ts`, side‑effect orchestrator in `orchestrator.ts`, hash‑chained log/snapshots/locks in `layer2.ts`, pure SHA‑256/512 in `hash.ts`, pluggable seams (Clock/Hasher/Serializer) in `adapters.ts`, durable JSONL effect store in `file_store.ts`.
 - `test/`: Lightweight TS test files (e.g., `main.test.ts`) sharing the harness in `test_utils.ts`.
 - `examples/`: Runnable demos (e.g., `examples/layer2_example.ts`).
 - `bench/`: Microbenchmarks and usage demos (e.g., `bench/main.ts`).
@@ -10,8 +10,8 @@
 ## Build, Test, and Development Commands
 - `npm run build`: Clean `dist/` and compile TypeScript with declarations.
 - `npm run clean`: Remove `dist/` using `rimraf`.
-- `npm test`: Run all suites (`test:main`, `test:orchestrator`, `test:layer2`) sequentially.
-- `npm run test:main` / `test:orchestrator` / `test:layer2`: Run a single suite via `ts-node` (CommonJS override).
+- `npm test`: Run all suites (`test:main`, `test:orchestrator`, `test:layer2`, `test:seams`) sequentially.
+- `npm run test:main` / `test:orchestrator` / `test:layer2` / `test:seams`: Run a single suite via `ts-node` (CommonJS override).
 - Example (ad‑hoc): `npx ts-node --compiler-options '{"module":"CommonJS"}' bench/main.ts`.
 
 ## Coding Style & Naming Conventions

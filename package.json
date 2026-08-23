@@ -11,10 +11,11 @@
     "clean": "rimraf dist",
     "lint": "tsc --noEmit",
     "build": "npm run clean && tsc --declaration",
-    "test": "npm run test:main && npm run test:orchestrator && npm run test:layer2",
+    "test": "npm run test:main && npm run test:orchestrator && npm run test:layer2 && npm run test:seams",
     "test:main": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/main.test.ts",
     "test:orchestrator": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/orchestrator.test.ts",
-    "test:layer2": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/layer2.test.ts"
+    "test:layer2": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/layer2.test.ts",
+    "test:seams": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/seams.test.ts"
   },
   "repository": {
     "type": "git",

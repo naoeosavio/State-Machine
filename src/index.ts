@@ -55,13 +55,3 @@ export {
   Layer2,
   create_layer2,
 } from './layer2';
-// BigInt fixed-point math exports
-export {
-  Fixed,
-  create_fixed,
-  rescale,
-  add,
-  subtract,
-  multiply,
-  to_string,
-} from './bigint_math';

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/`: TypeScript sources. Core state machine in `main.ts`, public exports in `index.ts`, side‑effect orchestrator in `orchestrator.ts`, hash‑chained log/snapshots/locks in `layer2.ts`, deterministic BigInt fixed‑point math in `bigint_math.ts`, pure SHA‑256/512 in `hash.ts`.
+- `src/`: TypeScript sources. Dual‑mode (`rollback`/`ledger`) core state machine in `main.ts` (typed errors via `lite-fp`), public exports in `index.ts`, side‑effect orchestrator in `orchestrator.ts`, hash‑chained log/snapshots/locks in `layer2.ts`, pure SHA‑256/512 in `hash.ts`.
 - `test/`: Lightweight TS test files (e.g., `main.test.ts`) sharing the harness in `test_utils.ts`.
 - `examples/`: Runnable demos (e.g., `examples/layer2_example.ts`).
 - `bench/`: Microbenchmarks and usage demos (e.g., `bench/main.ts`).

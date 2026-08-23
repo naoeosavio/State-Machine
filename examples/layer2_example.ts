@@ -1,6 +1,5 @@
 import { new_mach, Game, Action } from '../src/main';
 import { create_layer2 } from '../src/layer2';
-import { create_fixed, add, multiply, to_string } from '../src/bigint_math';
 
 type BankState = {
   balances: Record<string, bigint>;
@@ -124,20 +123,7 @@ if (lock_token) {
   console.log(`   Lock released: ${released ? '✓' : '✗'}`);
 }
 
-console.log('\n6. Testing BigInt math utilities...');
-const price = create_fixed('25.75', 2);
-const quantity = create_fixed('3.5', 1);
-const total = multiply(price, quantity);
-console.log(`   Price: ${to_string(price)}`);
-console.log(`   Quantity: ${to_string(quantity)}`);
-console.log(`   Total: ${to_string(total)}`);
-
-const fee_percent = create_fixed('2.5', 1);
-const fee = multiply(total, fee_percent);
-const fee_scaled = create_fixed(to_string(fee).split('.')[0] || '0', 0);
-console.log(`   Fee (2.5%): ${to_string(fee_scaled)}`);
-
-console.log('\n7. Replaying from snapshot...');
+console.log('\n6. Replaying from snapshot...');
 const snapshots = layer2.export_snapshots();
 if (snapshots.length > 1) {
   const snapshot = snapshots[1];
@@ -152,5 +138,5 @@ console.log('✓ Append-only immutable log');
 console.log('✓ Schema versioning');
 console.log('✓ Idempotency via actionId');
 console.log('✓ Chained hash system (blockchain-style)');
-console.log('✓ Deterministic BigInt math');
+console.log('✓ Native BigInt money balances');
 console.log('✓ Pessimistic/optimistic locking');

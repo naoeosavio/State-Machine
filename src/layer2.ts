@@ -416,6 +416,102 @@ export class Layer2<S, A> {
       chain_integrity: this.get_chain_integrity().valid,
     };
   }
+
+  /**
+   * Serialize the full audit trail (meta + entries + snapshots) as JSONL.
+   * Timestamps are recorded but never hashed, so chains verify regardless of
+   * the clock used when they were produced. BigInt values are encoded as
+   * "123n" strings (lossy on plain reload; use a custom serializer pipeline
+   * for exotic states).
+   */
+  public export_chain(): string {
+    const lines: string[] = [];
+    lines.push(Mach.canonical_stringify({
+      kind: 'meta',
+      schema_version: this.config.schema_version,
+      hash_algorithm: this.config.hasher ? 'custom' : this.config.hash_algorithm,
+    }));
+    for (const entry of this.immutable_log) {
+      lines.push(Mach.canonical_stringify({ kind: 'entry', ...entry }));
+    }
+    for (const snapshot of this.snapshots) {
+      lines.push(Mach.canonical_stringify({ kind: 'snapshot', ...snapshot }));
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * Restore log + snapshots from `export_chain` output, verifying every hash
+   * by recomputation (tamper-evident). On success the chain resumes appending
+   * exactly where it stopped. Nothing is mutated on failure.
+   */
+  public load_chain(jsonl: string): Result<void, Layer2Error> {
+    let records: any[];
+    try {
+      records = jsonl.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+    } catch {
+      return fail('CHAIN_BROKEN');
+    }
+    if (!records.length || records[0]!.kind !== 'meta') {
+      return fail('CHAIN_BROKEN');
+    }
+
+    const entries: ImmutableLogEntry<S, A>[] = [];
+    const snapshots: Snapshot<S>[] = [];
+    for (const rec of records.slice(1)) {
+      if (rec.kind === 'entry') entries.push(rec);
+      else if (rec.kind === 'snapshot') snapshots.push(rec);
+      else return fail('CHAIN_BROKEN');
+    }
+    if (!snapshots.length || snapshots[0]!.snapshot_id !== 'genesis') {
+      return fail('CHAIN_BROKEN');
+    }
+
+    // Recompute genesis hash.
+    let running = this.hasher('genesis|' + this.serializer.stringify_state(snapshots[0]!.state));
+    if (snapshots[0]!.hash !== running) return fail('CHAIN_BROKEN');
+
+    // Verify every entry by deterministic recomputation.
+    for (const entry of entries) {
+      if (!entry.action_id || !entry.action || !entry.state_before || !entry.state_after) {
+        return fail('CHAIN_BROKEN');
+      }
+      if (entry.previous_hash !== running) return fail('CHAIN_BROKEN');
+      const recomputed = this.compute_hash(
+        entry.previous_hash,
+        entry.action_id,
+        this.serializer.stringify_action(entry.action),
+        this.serializer.stringify_state(entry.state_before),
+        this.serializer.stringify_state(entry.state_after),
+        entry.tick.toString(),
+      );
+      if (recomputed !== entry.hash) return fail('CHAIN_BROKEN');
+      running = entry.hash;
+    }
+
+    // Verify each non-genesis snapshot against its claimed predecessor.
+    // (entry-id membership of log_entries_since_previous is structural v1;
+    // hash recomputation already covers state/tick/prev linkage.)
+    for (let i = 1; i < snapshots.length; ++i) {
+      const snap = snapshots[i]!;
+      const prev_snap = snapshots[i - 1]!;
+      if (snap.previous_snapshot_hash !== prev_snap.hash) return fail('CHAIN_BROKEN');
+      const recomputed = this.compute_hash(
+        prev_snap.hash,
+        this.serializer.stringify_state(snap.state),
+        snap.tick.toString(),
+        snap.log_entries_since_previous.join(','),
+      );
+      if (recomputed !== snap.hash) return fail('CHAIN_BROKEN');
+    }
+
+    // Success: atomically swap internals and resume chaining.
+    this.immutable_log = entries;
+    this.snapshots = snapshots;
+    this.action_id_map = new Map(entries.map(e => [e.action_id!, e.entry_id]));
+    this.last_hash = running;
+    return done(undefined);
+  }
 }
 
 export function create_layer2<S, A>(

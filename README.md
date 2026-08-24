@@ -153,3 +153,43 @@ const layer2 = create_layer2(mach, game, { snapshot_interval: 100 });
 layer2.register_action_with_id(action, 'unique-action-id'); // idempotent by actionId
 layer2.get_chain_integrity(); // verifies hash chain
 ```
+
+### Recipes
+
+#### Trading bot (`mode: 'ledger'` + Layer2 audit trail)
+
+- **One `Mach` per symbol/strategy.** Ticks derive from exchange timestamps; candle close = a tick.
+- **Risk checks live in `when`** (pure): insufficient balance / max position / rate limits simply
+  return the state unchanged — invalid orders never exist in history.
+- **Orders are side effects**, not state: the orchestrator executor sends to the exchange with
+  `key: client_order_id`, and a **durable** `seen` store prevents duplicate orders across restarts:
+
+  ```typescript
+  import { new_file_store } from '@uwu-games/uwu-state-machine';
+  const orchestrator = create_orchestrator({ mach, game, generator, executor, seen: new_file_store('seen.jsonl') });
+  ```
+- **Reconciliation:** an exchange snapshot arrives as a regular *action* that realigns state;
+  drift detection compares local vs expected state hashes.
+- **Audit:** wrap everything in `create_layer2`; `export_chain()` produces a tamper-evident JSONL
+  archive, `load_chain()` restores and resumes it after crashes.
+- Late market data is rejected explicitly (`ACTION_IN_PAST`) — silence hides desync, errors don't.
+
+#### Multiplayer games (`mode: 'rollback'` netcode)
+
+- Server is authoritative and runs one `Mach` per room; client inputs arrive as actions with input
+  timestamps.
+- Clients predict by running the **same `Game`** on a local machine; when the authoritative action
+  arrives, the server correction is just a retroactive `register_action` — rollback and recompute
+  are the core's job, not yours.
+- Keep `max_tick_travel` ≈ worst-case network jitter (e.g. 200–250ms). Beyond that,
+  `try_compute` returns `TRAVEL_LIMIT_EXCEEDED` instead of silently resyncing wrong.
+- Use `{ freeze_states: true }` in development to catch impure `when`/`tick` implementations early.
+- Late joiners: send them a recent Layer2 `Snapshot`, they continue via
+  `replay_from_snapshot` locally.
+- Long sessions: enable `autocommit_ticks` to bound memory, or `commit()` manually between rounds.
+
+#### Backtesting
+
+- Build the same `Game` you run in production, feed historical events as actions, and probe states
+  with `fast_forward(time)` — it computes forward **without writing caches**, so months of ticks
+  run in flat memory (see `BENCH.md`).

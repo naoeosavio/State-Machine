@@ -16,6 +16,9 @@ export { run } from './main';
 export { commit } from './main';
 export { serialize_machine } from './main';
 export { deserialize_machine } from './main';
+export { MACH_SCHEMA_VERSION } from './main';
+export { canonical_stringify, deep_freeze } from './main';
+export { fast_forward } from './main';
 export { reset_machine } from './main';
 export { get_state_at_tick } from './main';
 export { get_action_at_tick } from './main';
@@ -67,6 +70,7 @@ export {
   Hasher,
   Serializer,
   json_serializer,
+  legacy_json_serializer,
 } from './adapters';
 // Durable effect store
 export { new_file_store } from './file_store';

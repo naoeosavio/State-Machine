@@ -10,8 +10,8 @@
 ## Build, Test, and Development Commands
 - `npm run build`: Clean `dist/` and compile TypeScript with declarations.
 - `npm run clean`: Remove `dist/` using `rimraf`.
-- `npm test`: Run all suites (`test:main`, `test:orchestrator`, `test:layer2`, `test:seams`) sequentially.
-- `npm run test:main` / `test:orchestrator` / `test:layer2` / `test:seams`: Run a single suite via `ts-node` (CommonJS override).
+- `npm test`: Run all suites (`test:main`, `test:orchestrator`, `test:layer2`, `test:seams`, `test:backlog`) sequentially.
+- `npm run test:main` / `test:orchestrator` / `test:layer2` / `test:seams` / `test:backlog`: Run a single suite via `ts-node` (CommonJS override).
 - Example (ad‑hoc): `npx ts-node --compiler-options '{"module":"CommonJS"}' bench/main.ts`.
 
 ## Coding Style & Naming Conventions

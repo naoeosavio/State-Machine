@@ -1,4 +1,5 @@
 import * as Mach from './main';
+import { canonical_stringify } from './main';
 
 /**
  * Pluggable environmental seams. Everything a driver could reasonably swap
@@ -43,7 +44,22 @@ export type Serializer<S, A> = {
 const bigint_replacer = (_key: string, value: any) =>
   typeof value === 'bigint' ? value.toString() + 'n' : value;
 
+/**
+ * Default serializer. Hashing outputs are canonical (sorted keys), so two
+ * structurally equal states/actions hash identically regardless of key
+ * insertion order — critical for cross-peer chain equality.
+ */
 export function json_serializer<S, A>(): Serializer<S, A> {
+  return {
+    stringify_state: (state) => canonical_stringify(state),
+    parse_state: (raw) => JSON.parse(raw),
+    stringify_action: (action) => canonical_stringify(action),
+    parse_action: (raw) => JSON.parse(raw),
+  };
+}
+
+/** Legacy bigint-safe JSON (key-order sensitive); kept for saves/debugging. */
+export function legacy_json_serializer<S, A>(): Serializer<S, A> {
   return {
     stringify_state: (state) => JSON.stringify(state, bigint_replacer),
     parse_state: (raw) => JSON.parse(raw),

@@ -145,9 +145,7 @@ function canonicalize(value: any): any {
 }
 
 export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>): Result<void, MachError> {
-  var time = action.time;
-  var tick = time_to_tick(mach, time);
-  var hash = canonical_stringify(action);
+  const tick = time_to_tick(mach, action.time);
 
   // Ledger mode: never rewrite published history.
   // Guard runs before any mutation so a rejected action has zero side effects.
@@ -155,21 +153,25 @@ export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>): Resu
     return fail('ACTION_IN_PAST');
   }
 
-  // Initilize this tick's actions
-  if (!mach.action_logs[tick]) {
-    mach.action_logs[tick] = [];
+  // Initialize this tick's actions
+  let actions = mach.action_logs[tick];
+  if (!actions) {
+    mach.action_logs[tick] = actions = [];
   }
 
   // Updates the first action tick
   mach.genesis_tick = Math.min(mach.genesis_tick, tick);
 
-  // Get this tick's actions
-  var actions = mach.action_logs[tick]!;
-
-  // If the message is duplicated, skip it (canonical compare: key order irrelevant)
-  for (let action of actions) {
-    if (canonical_stringify(action) == hash) {
-      return done(undefined);
+  // If the message is duplicated, skip it (canonical compare: key order
+  // irrelevant). The stringify is only paid when this tick already has
+  // actions — the empty-bucket fast path skips it entirely.
+  if (actions.length > 0) {
+    const hash = canonical_stringify(action);
+    for (let i = 0; i < actions.length; ++i) {
+      const existing = actions[i]!;
+      if (existing === action || canonical_stringify(existing) === hash) {
+        return done(undefined);
+      }
     }
   }
 
@@ -188,7 +190,7 @@ export function register_action<S, A>(mach: Mach<S, A>, action: Action<A>): Resu
 }
 
 export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S {
-  var end_t = time_to_tick(mach, time);
+  let end_t = time_to_tick(mach, time);
 
   // Ledger mode never travels backwards; plain compute clamps to the head.
   // Use try_compute to get an explicit COMPUTE_BEHIND_HEAD error instead.
@@ -196,8 +198,8 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
     end_t = mach.cached_tick;
   }
 
-  var ini_t = mach.cached_tick;
-  var state = mach.state_logs[ini_t];
+  let ini_t = mach.cached_tick;
+  let state = mach.state_logs[ini_t];
 
   if (!state) {
     state = game.init();
@@ -214,22 +216,31 @@ export function compute<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Time): S
   }
 
   // NOTE: actions of tick X happen AFTER its recorded state
-  for (var t = ini_t; t <= end_t; ++t) {
+  const freeze = mach.freeze_states === true;
+  const state_logs = mach.state_logs;
+  const action_logs = mach.action_logs;
+  // Head after the loop: max(old cached_tick, end_t) — same value the old
+  // per-iteration Math.max would land on, but written back only once.
+  const head = mach.cached_tick > end_t ? mach.cached_tick : end_t;
+
+  for (let t = ini_t; t <= end_t; ++t) {
     // Caches this tick
-    mach.cached_tick = Math.max(mach.cached_tick, t);
-    if (mach.freeze_states) deep_freeze(state);
-    mach.state_logs[t] = state;
+    if (freeze) deep_freeze(state);
+    state_logs[t] = state;
 
     // Computes the tick
     state = game.tick(state);
 
     // Computes the actions
-    var actions = mach.action_logs[t] || [];
-    for (var action of actions) {
-      state = game.when(action, state);
+    const actions = action_logs[t];
+    if (actions !== undefined) {
+      for (let i = 0; i < actions.length; ++i) {
+        state = game.when(actions[i]!, state);
+      }
     }
   }
 
+  mach.cached_tick = head;
   mach.last_state = state;
 
   // Auto-commit policy: trim logs older than the retention window.
@@ -282,11 +293,14 @@ export function fast_forward<S, A>(mach: Mach<S, A>, game: Game<S, A>, time: Tim
     return state;
   }
 
-  for (var t = ini_t; t <= end_t; ++t) {
+  const action_logs = mach.action_logs;
+  for (let t = ini_t; t <= end_t; ++t) {
     state = game.tick(state);
-    var actions = mach.action_logs[t] || [];
-    for (var action of actions) {
-      state = game.when(action, state);
+    const actions = action_logs[t];
+    if (actions !== undefined) {
+      for (let i = 0; i < actions.length; ++i) {
+        state = game.when(actions[i]!, state);
+      }
     }
   }
   return state;

@@ -10,6 +10,7 @@
   "scripts": {
     "clean": "rimraf dist",
     "lint": "tsc --noEmit",
+    "bench": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' bench/main.ts",
     "build": "npm run clean && tsc --declaration",
     "test": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' test/index.ts"
   },
@@ -40,6 +41,6 @@
     "access": "public"
   },
   "dependencies": {
-    "lite-fp": "0.8.0"
+    "lite-fp": "0.8.1"
   }
 }

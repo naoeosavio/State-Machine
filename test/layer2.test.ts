@@ -1,5 +1,5 @@
 import { isDone, isFail, err, val } from 'lite-fp';
-import { describe, it, assert, run_all_tests } from './test_utils';
+import { describe, it, assert } from './utils';
 import * as Mach from '../src/main';
 import { create_layer2 } from '../src/layer2';
 
@@ -248,5 +248,4 @@ describe('Layer2 System', () => {
   });
 });
 
-run_all_tests();
 

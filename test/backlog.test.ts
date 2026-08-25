@@ -2,7 +2,7 @@ import * as Mach from '../src/main';
 import { create_layer2 } from '../src/layer2';
 import { simulated_clock } from '../src/adapters';
 import { isDone, isFail, err, val } from 'lite-fp';
-import { assert, describe, it, run_all_tests } from './test_utils';
+import { assert, describe, it } from './utils';
 
 type State = { count: number };
 type Action = { type: 'inc', time: number, meta?: { seq: number } };
@@ -63,7 +63,7 @@ describe('P1: dev-mode immutability guard', () => {
     assert.ok(Object.isFrozen(cached), "cached state must be frozen");
     assert.throws(() => {
       (cached as any).count = before + 99;
-    }, "mutating frozen history must throw");
+    }, "Cannot assign to read only property 'count' of object '#<Object>'");
     assert.equal(cached.count, before, "mutation attempt must not take effect");
   });
 
@@ -266,7 +266,7 @@ describe('P3: save versioning', () => {
     const doc = JSON.parse(Mach.serialize_machine(mach, json_ser()));
     doc.__sm_format__ = Mach.MACH_SCHEMA_VERSION + 99;
     assert.throws(() => Mach.deserialize_machine(JSON.stringify(doc), json_ser()),
-      "future versions must fail loudly, not misparse");
+      "Machine envelope v100 is newer than supported v1.");
   });
 
 });
@@ -282,5 +282,3 @@ function json_ser() {
     parse_action: (raw: string) => JSON.parse(raw),
   };
 }
-
-run_all_tests();

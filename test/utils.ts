@@ -34,13 +34,17 @@ export const assert = {
       throw new Error(message);
     }
   },
-  throws: (fn: () => void, message: string = "Function should throw") => {
+  throws: (fn: () => void, expected: string = "Function should throw") => {
     try {
       fn();
-      throw new Error(message);
-    } catch {
-      // Expected
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg !== expected) {
+        throw new Error(`Expected error message "${expected}", got "${msg}"`);
+      }
+      return;
     }
+    throw new Error(expected);
   },
 };
 

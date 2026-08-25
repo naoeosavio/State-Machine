@@ -12,7 +12,7 @@ import {
 import { new_file_store } from '../src/file_store';
 import * as Orchestrator from '../src/orchestrator';
 import type { EffectStore } from '../src/orchestrator';
-import { assert, describe, it, run_all_tests } from './test_utils';
+import { assert, describe, it } from './utils';
 
 type State = { count: number; big?: bigint };
 type Action = { type: 'inc', time: number };
@@ -225,4 +225,3 @@ function temp_path(): string {
   return path.join(os.tmpdir(), `sm-file-store-test-${process.pid}-${++tmp_counter}.jsonl`);
 }
 
-run_all_tests();

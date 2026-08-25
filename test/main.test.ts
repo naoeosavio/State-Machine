@@ -1,6 +1,6 @@
 import * as Mach from '../src/main';
 import { done, fail, isDone, isFail, err, val } from 'lite-fp';
-import { assert, describe, it, run_all_tests } from './test_utils';
+import { assert, describe, it } from './utils';
 
 // Test Suite
 type State = { count: number };
@@ -28,8 +28,8 @@ describe("State Machine Core", () => {
   });
 
   it("should throw an error for invalid new_mach arguments", () => {
-    assert.throws(() => Mach.new_mach(game, 0, 1000), "Should have thrown for non-positive ticks_per_second");
-    assert.throws(() => Mach.new_mach(game, 60, -1), "Should have thrown for negative max_ms_travel");
+    assert.throws(() => Mach.new_mach(game, 0, 1000), "ticks_per_second must be a positive number.");
+    assert.throws(() => Mach.new_mach(game, 60, -1), "max_ms_travel cannot be negative.");
   });
 
   it("should convert time to ticks correctly", () => {
@@ -260,4 +260,3 @@ describe("Dual Mode (rollback x ledger)", () => {
 
 });
 
-run_all_tests();

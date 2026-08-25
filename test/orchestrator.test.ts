@@ -1,7 +1,7 @@
 import * as Mach from '../src/main';
 import * as Orchestrator from '../src/orchestrator';
 import { isDone, val } from 'lite-fp';
-import { assert, describe, it, run_all_tests } from './test_utils';
+import { assert, describe, it } from './utils';
 
 // --- Test Setup ---
 
@@ -253,4 +253,4 @@ describe('Orchestrator.dispatch', () => {
 
 });
 
-run_all_tests();
+
